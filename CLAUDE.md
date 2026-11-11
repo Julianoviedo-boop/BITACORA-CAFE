@@ -12,6 +12,29 @@ Sistema donde el caficultor manda audios o texto por WhatsApp sobre lo que hizo 
 - **Entorno:** Docker Compose
 - **Canal:** OpenBSP (WhatsApp)
 
+## Estructura de carpetas
+```
+backend/
+  app/
+    api/            # Endpoints FastAPI (incluye el webhook)
+    channels/       # Único lugar que habla con WhatsApp (OpenBSP)
+    db/             # Modelos SQLAlchemy y sesión
+    domain/         # Reglas y casos de uso (lotes, eventos, confirmaciones)
+    transcription/  # faster-whisper
+    extraction/     # Llamadas a Claude con salida estructurada
+    reports/        # Reporte de trazabilidad del lote
+    worker/         # Tareas de Celery
+  alembic/          # Migraciones
+  tests/fixtures/   # Audios y textos de ejemplo para pruebas
+web/                # Panel en Next.js
+config/
+  eventos.yaml      # Tipos de evento y sus campos
+  alertas.yaml      # Reglas de alertas
+  vocabulario.txt   # Términos cafeteros para ayudar a la transcripción
+scripts/            # Utilidades (simular mensajes, evaluar extracción)
+docs/               # Especificación y decisiones
+```
+
 ## Reglas de Oro (Obligatorias)
 1. Toda consulta a la base de datos debe filtrar obligatoriamente por `organization_id`.
 2. Nada se guarda como evento confirmado sin la confirmación explícita del usuario por WhatsApp.
