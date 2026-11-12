@@ -1,0 +1,138 @@
+# Entorno local de desarrollo. Ver README.md.
+# Todos los puertos se publican solo en 127.0.0.1 (no quedan expuestos a la red).
+
+name: bitacora-cafe
+
+x-backend: &backend
+  env_file: .env
+  environment:
+    CONFIG_DIR: /config
+    HF_HOME: /home/app/.cache/huggingface
+  volumes:
+    - ./backend:/app
+    - ./config:/config:ro
+    - hf_cache:/home/app/.cache/huggingface
+  depends_on:
+    db:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+
+services:
+  api:
+    <<: *backend
+    build:
+      context: ./backend
+      target: dev
+    environment:
+      CONFIG_DIR: /config
+      HF_HOME: /home/app/.cache/huggingface
+      # En Windows/macOS los eventos de archivos no siempre cruzan el montaje.
+      WATCHFILES_FORCE_POLLING: "true"
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload --reload-dir /app/app
+    ports:
+      - "127.0.0.1:8000:8000"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=4).status == 200 else 1)"
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+
+  # Sin container_name para poder escalar: docker compose up -d --scale worker=3
+  worker:
+    <<: *backend
+    build:
+      context: ./backend
+      target: worker
+
+  web:
+    build:
+      context: ./web
+      target: dev
+    env_file: .env
+    environment:
+      API_INTERNAL_URL: http://api:8000
+      WATCHPACK_POLLING: "true"
+    volumes:
+      - ./web:/app
+      - /app/node_modules
+      - /app/.next
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      api:
+        condition: service_healthy
+
+  db:
+    image: postgres:17-alpine
+    env_file: .env
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7.4-alpine
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    ports:
+      - "127.0.0.1:6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  adminer:
+    image: adminer:5
+    environment:
+      ADMINER_DEFAULT_SERVER: db
+    ports:
+      - "127.0.0.1:8081:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  flower:
+    image: mher/flower:2.0
+    env_file: .env
+    # Celery toma el broker de la variable CELERY_BROKER_URL del .env
+    command: celery flower --port=5555
+    ports:
+      - "127.0.0.1:5555:5555"
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  dozzle:
+    image: amir20/dozzle:latest
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    ports:
+      - "127.0.0.1:8888:8080"
+
+  # Túnel público hacia la API (para recibir el webhook de WhatsApp).
+  # Se activa con: docker compose --profile tunnel up -d
+  tunnel:
+    image: cloudflare/cloudflared:latest
+    profiles: ["tunnel"]
+    command: tunnel --no-autoupdate --url http://api:8000
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  pg_data:
+  redis_data:
+  hf_cache:

@@ -1,0 +1,56 @@
+# Diferencias para producción. Se usa encima del archivo base:
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+# - Imágenes finales (sin recarga, sin código montado desde el host).
+# - adminer, flower y dozzle sin puertos publicados.
+# - restart: unless-stopped en todos los servicios.
+
+services:
+  api:
+    build:
+      target: api
+    command: !reset null
+    environment:
+      CONFIG_DIR: /config
+      HF_HOME: /home/app/.cache/huggingface
+      WATCHFILES_FORCE_POLLING: !reset null
+    volumes: !override
+      - ./config:/config:ro
+      - hf_cache:/home/app/.cache/huggingface
+    restart: unless-stopped
+
+  worker:
+    volumes: !override
+      - ./config:/config:ro
+      - hf_cache:/home/app/.cache/huggingface
+    restart: unless-stopped
+
+  web:
+    build:
+      target: prod
+    environment:
+      WATCHPACK_POLLING: !reset null
+    volumes: !reset []
+    restart: unless-stopped
+
+  db:
+    ports: !reset []
+    restart: unless-stopped
+
+  redis:
+    ports: !reset []
+    restart: unless-stopped
+
+  adminer:
+    ports: !reset []
+    restart: unless-stopped
+
+  flower:
+    ports: !reset []
+    restart: unless-stopped
+
+  dozzle:
+    ports: !reset []
+    restart: unless-stopped
+
+  tunnel:
+    restart: unless-stopped
