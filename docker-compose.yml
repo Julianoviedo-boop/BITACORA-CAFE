@@ -11,6 +11,7 @@ x-backend: &backend
   volumes:
     - ./backend:/app
     - ./config:/config:ro
+    - ./scripts:/scripts:ro
     - hf_cache:/home/app/.cache/huggingface
   depends_on:
     db:
