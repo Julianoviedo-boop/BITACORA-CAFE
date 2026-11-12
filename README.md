@@ -43,9 +43,20 @@ curl http://localhost:8000/health
 docker compose exec api python -c "from app.worker.tasks import ping; print(ping.delay().get(timeout=10))"
 # pong
 
-# Pruebas del backend
-docker compose exec api pytest
+# Pruebas del backend (usan la base bitacora_cafe_test, que se crea sola)
+docker compose exec -e REQUIRE_DB_TESTS=1 api pytest
 ```
+
+## Base de datos
+
+```bash
+docker compose exec api alembic upgrade head          # aplicar migraciones
+docker compose exec api python /scripts/seed.py       # datos de ejemplo (2 organizaciones)
+docker compose exec api alembic revision --autogenerate -m "describa el cambio"
+docker compose exec api alembic check                 # ¿los modelos y las migraciones coinciden?
+```
+
+Los endpoints y las tareas no consultan la base directamente: usan los repositorios de `app/db/repositories/`, y todos sus métodos exigen `organization_id`.
 
 ## Comandos útiles
 

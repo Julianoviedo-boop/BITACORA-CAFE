@@ -55,3 +55,33 @@ Formato: cada decisión tiene fecha, contexto, decisión y consecuencias. Las nu
 ## D-009 · Stack base
 - **Fecha:** 2026-11-11
 - **Decisión:** FastAPI + SQLAlchemy 2 + Alembic + PostgreSQL en el backend; Next.js + Tailwind + shadcn/ui en el panel; todo orquestado con Docker Compose. Secretos solo por variables de entorno.
+
+## D-010 · JSONB para los datos de cada evento (`lot_events.data`)
+- **Fecha:** 2026-11-12
+- **Contexto:** Cada tipo de evento trae campos distintos: una abonada tiene insumo, cantidad y unidad; una fumigación, producto, dosis y días de carencia; una recolección, kilos de cereza y número de recolectores. Esos tipos y sus campos se definen en `config/eventos.yaml` (D-007) y van a cambiar con el uso, por finca o por certificación.
+- **Decisión:** Las columnas comunes a todos los eventos son columnas normales (`lot_id`, `event_type`, `occurred_at`, `status`, `confidence`, `original_text`, `message_id`). Los campos propios de cada tipo van en una sola columna `data` de tipo JSONB.
+- **Por qué JSONB y no otra cosa:**
+  - **Frente a una tabla o columnas por tipo de evento:** agregar un tipo o un campo en `eventos.yaml` no exige una migración ni desplegar código. Si el esquema dependiera del YAML, cada ajuste agronómico se volvería un cambio de base de datos, que es justo lo que D-007 quiere evitar.
+  - **Frente a un modelo entidad‑atributo‑valor (una fila por campo):** un evento se lee y se escribe en una sola fila, sin uniones; los valores conservan su tipo (número, texto, lista) y la historia del lote sale con una consulta simple.
+  - **Frente a JSON o TEXT:** JSONB se guarda ya analizado, permite índices GIN y operadores como `data @> '{"insumo": "17-6-18"}'` para buscar, por ejemplo, todos los lotes donde se aplicó un producto. Se creó el índice `ix_lot_events_data` (GIN, `jsonb_path_ops`) para eso.
+  - **Encaja con la extracción:** Claude devuelve un objeto validado con Pydantic (D-005); se guarda tal cual, sin traducirlo a columnas.
+- **Consecuencias:**
+  - La base no valida la forma de `data`: la validación es responsabilidad del código, con modelos Pydantic generados desde `eventos.yaml`, **antes** de guardar. Ningún dato entra a `data` sin pasar por esa validación.
+  - Si un campo se vuelve crítico para consultas frecuentes o para reglas de alertas (p. ej. días de carencia), se puede promover a columna o a índice de expresión sin perder lo histórico.
+  - Al cambiar un campo en `eventos.yaml`, los eventos viejos conservan la forma con que se guardaron; los reportes deben tolerar campos ausentes.
+
+## D-011 · Aislamiento entre organizaciones en dos capas: repositorios y FKs compuestas
+- **Fecha:** 2026-11-12
+- **Contexto:** D-008 exige filtrar todo por `organization_id`. Un solo olvido en una consulta expone datos de otra organización.
+- **Decisión:**
+  1. **Repositorios** (`app/db/repositories/`): son el único acceso a la base desde endpoints y tareas. Todo método público recibe `organization_id` como primer argumento y falla si no es un UUID. No se pueden asignar `organization_id`, `id` ni timestamps desde `add()`/`update()`.
+  2. **Base de datos:** cada tabla de negocio tiene `UNIQUE (organization_id, id)` y las referencias entre tablas son FKs compuestas `(organization_id, x_id)`. PostgreSQL rechaza, por ejemplo, un evento de la organización A sobre un lote de B aunque el código tenga un error.
+  3. Los modelos **no** declaran `relationship()`: la carga perezosa haría consultas por fuera del filtro.
+- **Consecuencias:** `tests/test_aislamiento_organizaciones.py` ataca cada método público de cada repositorio con datos de otra organización y verifica que no devuelve ni modifica nada; una meta‑prueba falla si se agrega un método sin su caso. Las FKs usan `ON DELETE RESTRICT` (borrar en cascada entre tablas se decide caso por caso).
+- **Pendiente:** el enlace público del reporte (`lots.public_token`) se consulta hoy dentro de una organización; la página pública necesitará un método de solo lectura que busque por token sin `organization_id`, como excepción explícita y probada.
+
+## D-012 · Estados de un evento: `pendiente`, `confirmado`, `rechazado`
+- **Fecha:** 2026-11-12
+- **Contexto:** La especificación inicial tenía `borrador`, `pendiente_confirmacion`, `confirmado` y `descartado`.
+- **Decisión:** Se simplifica a tres estados. El evento nace `pendiente`; solo `LotEventRepository.confirm()` o `reject()` lo cambian, una sola vez, y el estado no se puede asignar con `add()` ni `update()` (regla de oro 2). Los datos faltantes se preguntan antes de crear el evento.
+- **Consecuencias:** Corregir un evento rechazado se hace creando uno nuevo, lo que deja rastro de ambos.

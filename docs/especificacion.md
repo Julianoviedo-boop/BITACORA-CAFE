@@ -19,7 +19,9 @@ El caficultor hace muchas labores en sus lotes (abonar, fumigar, desyerbar, reco
 9. **Reporte de trazabilidad.** Desde el panel web se genera el reporte por lote y rango de fechas.
 
 ## 3. Estados de un evento
-`borrador` → `pendiente_confirmacion` → `confirmado` | `descartado`
+`pendiente` → `confirmado` | `rechazado`
+
+Un evento nace `pendiente` cuando se extrae del mensaje y solo cambia de estado con la respuesta del usuario (ver D-012).
 
 Solo los eventos `confirmado` aparecen en la historia y en los reportes.
 
