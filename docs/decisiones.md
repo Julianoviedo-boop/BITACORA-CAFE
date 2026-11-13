@@ -150,3 +150,23 @@ Formato: cada decisión tiene fecha, contexto, decisión y consecuencias. Las nu
     Con `low` y el prompt nuevo: fecha 100 % (con el inicial asumía "hoy"), lote 92 % (no resuelve números por código). Se queda `medium`. Unos US$ 0,004 a 0,008 por corrida de 32 casos con caché.
   - Con 100 % en los dos grupos, el set ya no distingue entre versiones del prompt: hace falta agregar casos más difíciles antes del próximo ajuste.
   - Esa medición es optimista: `eventos.yaml` y los casos son un borrador escrito por el equipo de desarrollo y los textos son las referencias de los audios sintéticos, no transcripciones reales. Hay que agregar mensajes reales de productores.
+
+## D-016 · Conversación: estado en la base, de a una pregunta y correcciones sobre el pendiente
+- **Fecha:** 2026-11-13
+- **Contexto:** Después de extraer hay que cerrar el ciclo con el productor por WhatsApp: preguntar lo que falte, mostrar un resumen corto, y aceptar SÍ, correcciones (por audio o texto) o la cancelación. El worker se puede reiniciar entre un mensaje y el siguiente, y dos mensajes del mismo productor pueden caer en workers distintos.
+- **Decisión:**
+  1. **Estado en la tabla `conversations`**, una fila por productor: estado (`libre`, `preguntando`, `ofreciendo_lote`, `confirmando`), borradores de los eventos (JSONB), ids de los eventos pendientes, pregunta abierta, rondas de corrección y lo último que se le preguntó. Nada vive en memoria del worker.
+  2. **Tres pasos por mensaje** (`app/domain/conversacion.py`): leer (transacción corta) → Claude (sin transacción) → aplicar (transacción con la fila bloqueada `FOR UPDATE`). Una columna `version` detecta si otro worker cambió la conversación mientras se hablaba con Claude; en ese caso no se toca nada y se vuelve a empezar (hasta 3 veces; después reintenta Celery).
+  3. **Borradores y eventos:** mientras falte un dato obligatorio, el evento vive solo como borrador en la conversación (D-012: se pregunta antes de crear el evento). Cuando está completo se crea el `lot_event` *pendiente* y se manda el resumen. Una corrección **actualiza** ese pendiente (no crea otro); si la corrección quita un evento, el que sobra queda *rechazado*.
+  4. **Correcciones y respuestas con Claude:** `extraccion.revisar` manda los eventos propuestos, lo último que se le preguntó y el mensaje nuevo, y pide la lista completa corregida. Las instrucciones van en el mensaje del usuario, no en el system, para no cambiar el prompt medido en D-015 ni su caché. La salida pasa por la misma normalización.
+  5. **Sin Claude** para SÍ, NO, CANCELAR y los comandos (`mis lotes`, `resumen lote 3`, `ayuda`): se comparan con las listas de `config/conversacion.yaml`, sin tildes ni signos. Solo un SÍ de esa lista, en estado `confirmando` (o sea, después de ver el resumen), confirma (regla de oro 2). Un emoji solo (👍) no confirma.
+  6. **Límites:** máximo 3 correcciones después del resumen y máximo 3 veces la misma pregunta (`max_rondas`). Después se le pide hablar con el asesor; los eventos quedan *pendiente* para que el asesor los revise y la conversación se libera.
+  7. **Lote que no existe:** si Claude no pudo ubicar el lote pero el productor lo nombró, se le ofrece crearlo ("el 7" → "Lote 7", código `LOTE-007` si está libre) en su finca. Si el productor no tiene finca y la organización tiene varias, se pasa al asesor.
+  8. **Eventos sin lote:** `lot_events.lot_id` admite null para los tipos con `requiere_lote: false` (una venta). La FK compuesta se sigue verificando cuando hay lote.
+  9. **`lot_events.data`** guarda `{campo: {valor, unidad}}`, solo lo que el productor dijo. Para buscar: `data @> '{"insumo": {"valor": "17-6-18"}}'` (el ejemplo de D-010 era plano).
+  10. **Ventana de 24 horas:** antes de responder se revisa (`app/channels/ventana.py`) que el último mensaje del productor tenga menos de 24 horas. Si no, la respuesta no se manda: queda en `conversations.unsent_reply`, marcada `PENDIENTE(tarea de alertas)`, para que esa tarea la mande con una plantilla aprobada.
+- **Consecuencias:**
+  - El prompt de revisión **no está medido** con Claude real: `scripts/evaluar_extraccion.py` solo cubre la extracción inicial. Hay que agregar casos de corrección y de respuestas cortas ("4 bultos", "el lunes") antes de producción.
+  - Los textos de la conversación tutean ("Responde SÍ o dime qué cambiar"), como pidió el equipo; los de la autorización de datos (D-013) tratan de usted. Conviene unificarlos.
+  - Las respuestas de la autorización de datos y los avisos de transcripción todavía no revisan la ventana de 24 horas.
+  - Los eventos que quedan *pendiente* tras pasar al asesor necesitan una vista en el panel.

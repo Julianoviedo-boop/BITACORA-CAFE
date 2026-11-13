@@ -9,11 +9,15 @@ El caficultor hace muchas labores en sus lotes (abonar, fumigar, desyerbar, reco
 3. **Transcripción.** Si es audio, el worker lo descarga y lo transcribe con faster-whisper (CPU, modelo small), usando `config/vocabulario.txt` como pista de términos cafeteros.
 4. **Extracción.** El texto se envía a Claude con salida estructurada. Los tipos de evento y sus campos se definen en `config/eventos.yaml`. Resultado: tipo de evento, lote, fecha, insumos, cantidades, unidades y campos faltantes.
 5. **Resolución del lote.** Se busca el lote dentro de la organización del usuario (por nombre o alias). Si no se encuentra o hay varios parecidos, se le pregunta.
-6. **Confirmación.** Se le responde por WhatsApp con un resumen sencillo:
-   *"Entendí esto: Abonada en La Esperanza, hoy, 4 bultos de 17-6-18. ¿Está bien? Responda SÍ o NO."*
-   - **SÍ** → el evento pasa a *confirmado*.
-   - **NO** → se descarta o se pide que lo corrija.
-   - Si faltan datos obligatorios, se preguntan antes de pedir confirmación.
+6. **Confirmación.** Se le responde por WhatsApp con un resumen de una línea por evento:
+   *"Lote 3: abonada, hoy 7:30 a.m., 17-6-18, 4 bultos. ¿Está bien? Responde SÍ o dime qué cambiar."*
+   - **SÍ** → los eventos pasan a *confirmado*.
+   - **Una corrección** (audio o texto) → se actualiza el evento pendiente y se manda el resumen otra vez. Máximo 3 rondas; después se le pide hablar con el asesor.
+   - **CANCELAR** → los eventos pasan a *rechazado*.
+   - Si faltan datos obligatorios, se preguntan antes de pedir confirmación, una sola pregunta a la vez.
+   - Si nombra un lote que no existe, se le ofrece crearlo.
+   - En cualquier momento puede escribir **MIS LOTES**, **RESUMEN LOTE 3** o **AYUDA**.
+   - Ver D-016 y `config/conversacion.yaml`.
 7. **Historia del lote.** Los eventos confirmados forman la línea de tiempo del lote.
 8. **Alertas.** Según `config/alertas.yaml` (ej.: días de carencia tras una fumigación antes de recolectar), se avisa al caficultor.
 9. **Reporte de trazabilidad.** Desde el panel web se genera el reporte por lote y rango de fechas.
