@@ -296,11 +296,13 @@ def test_audio_con_consentimiento_queda_listo_para_transcribir(repos, canal, org
 def tareas(monkeypatch, reglas):
     from app.worker import tasks
 
-    avisos = []
+    avisos, conversaciones = [], []
     monkeypatch.setattr(tasks, "get_channel", lambda: "canal")
     monkeypatch.setattr(transcripcion, "get_reglas", lambda: reglas)
     monkeypatch.setattr(tasks.avisar_productor, "delay", lambda *a: avisos.append(a))
+    monkeypatch.setattr(tasks.atender_conversacion, "delay", lambda *a: conversaciones.append(a))
     tasks.avisos = avisos
+    tasks.conversaciones = conversaciones
     return tasks
 
 
@@ -330,9 +332,11 @@ def test_tarea_reintenta_la_descarga_y_al_final_avisa(monkeypatch, tareas):
 def test_tarea_sin_fallo_no_avisa(monkeypatch, tareas):
     monkeypatch.setattr(transcripcion, "transcribir_mensaje",
                         lambda *a: Resultado("transcrito"))
-    assert tareas.transcribir_audio.apply(args=(str(uuid.uuid4()), str(uuid.uuid4()))).get() == \
-        "transcrito"
+    org, msg = str(uuid.uuid4()), str(uuid.uuid4())
+    assert tareas.transcribir_audio.apply(args=(org, msg)).get() == "transcrito"
     assert tareas.avisos == []
+    # Ya transcrito, sigue la conversación (extracción y respuesta).
+    assert tareas.conversaciones == [(org, msg)]
 
 
 def test_tarea_usa_whisper_con_el_maximo_de_las_reglas(monkeypatch, tareas):
@@ -356,20 +360,28 @@ def test_procesar_mensaje_encola_la_transcripcion_solo_para_audios(monkeypatch):
     def uow():
         yield "repos"
 
-    encolados = []
+    encolados, conversaciones = [], []
     monkeypatch.setattr(tasks, "unit_of_work", uow)
     monkeypatch.setattr(tasks, "get_channel", lambda: "canal")
     monkeypatch.setattr(tasks, "get_textos", lambda: "textos")
     monkeypatch.setattr(tasks.transcribir_audio, "delay", lambda *a: encolados.append(a))
+    monkeypatch.setattr(tasks.atender_conversacion, "delay",
+                        lambda *a: conversaciones.append(a))
     org, msg = str(uuid.uuid4()), str(uuid.uuid4())
 
+    # Texto: directo a la conversación, sin transcribir.
     monkeypatch.setattr(tasks, "atender_mensaje", lambda *a: "listo_para_procesar")
     tasks.procesar_mensaje(org, msg)
-    assert encolados == []
+    assert encolados == [] and conversaciones == [(org, msg)]
 
     monkeypatch.setattr(tasks, "atender_mensaje", lambda *a: "listo_para_transcribir")
     assert tasks.procesar_mensaje(org, msg) == "listo_para_transcribir"
-    assert encolados == [(org, msg)]
+    assert encolados == [(org, msg)] and conversaciones == [(org, msg)]
+
+    # Sin autorización no sigue nada.
+    monkeypatch.setattr(tasks, "atender_mensaje", lambda *a: "consentimiento_solicitado")
+    tasks.procesar_mensaje(org, msg)
+    assert len(encolados) == 1 and len(conversaciones) == 1
 
 
 def test_avisar_productor_reintenta_fallas_del_canal():

@@ -2,14 +2,17 @@
 
 import logging
 import uuid
+from functools import lru_cache
 from pathlib import Path
 
 from celery.signals import worker_process_init
 
 from app.channels import ChannelTemporaryError, get_channel
 from app.db.repositories import unit_of_work
-from app.domain import transcripcion
+from app.domain import conversacion, transcripcion
 from app.domain.consentimiento import atender_mensaje, get_textos
+from app.extraction.llm import ClienteLLM
+from app.extraction.schema import catalogo_por_defecto
 from app.transcription import whisper
 from app.worker.celery_app import celery_app
 
@@ -19,6 +22,8 @@ logger = logging.getLogger(__name__)
 DESCARGA_MAX_REINTENTOS = 5
 DESCARGA_ESPERA_BASE_S = 30
 DESCARGA_ESPERA_MAX_S = 300
+# Reintentos de la conversación (Claude caído o conversación ocupada); misma espera.
+CONVERSACION_MAX_REINTENTOS = 5
 
 
 @worker_process_init.connect
@@ -61,6 +66,8 @@ def procesar_mensaje(organization_id: str, message_id: str) -> str:
     # Se encola después del commit, para que la otra tarea vea el mensaje.
     if resultado == "listo_para_transcribir":
         transcribir_audio.delay(organization_id, message_id)
+    elif resultado == "listo_para_procesar":
+        atender_conversacion.delay(organization_id, message_id)
     return resultado
 
 
@@ -98,7 +105,44 @@ def transcribir_audio(self, organization_id: str, message_id: str) -> str:
 
     if resultado.aviso:
         avisar_productor.delay(organization_id, message_id, resultado.aviso)
+    elif resultado.estado == "transcrito":
+        atender_conversacion.delay(organization_id, message_id)
     return resultado.estado
+
+
+@lru_cache
+def _cliente_llm() -> ClienteLLM:
+    # Uno por proceso: reutiliza las conexiones HTTP con la API de Claude.
+    return ClienteLLM()
+
+
+def _interprete() -> conversacion.Interprete:
+    return conversacion.Interprete(catalogo=catalogo_por_defecto(), cliente=_cliente_llm())
+
+
+@celery_app.task(name="atender_conversacion", bind=True, max_retries=CONVERSACION_MAX_REINTENTOS)
+def atender_conversacion(self, organization_id: str, message_id: str) -> str:
+    """Lleva la conversación con el productor: extracción, preguntas, resumen y
+    confirmación (app/domain/conversacion.py).
+
+    Reintenta las fallas temporales (Claude o el canal). Si Claude sigue fallando
+    al final de los reintentos, le avisa al productor que lo mande otra vez.
+    """
+    org_id, msg_id = uuid.UUID(organization_id), uuid.UUID(message_id)
+    textos = conversacion.get_textos()
+    try:
+        return conversacion.atender(unit_of_work, get_channel(), _interprete(), textos,
+                                    org_id, msg_id)
+    except (ChannelTemporaryError, conversacion.ReintentarError) as exc:
+        if self.request.retries < self.max_retries:
+            espera = _espera_descarga(self.request.retries)
+            logger.warning("conversacion msg=%s falla temporal (intento %d), reintento en %d s: %s",
+                           message_id, self.request.retries + 1, espera, exc)
+            raise self.retry(exc=exc, countdown=espera) from exc
+        if isinstance(exc, ChannelTemporaryError):
+            raise  # el canal sigue caído: tampoco se le puede avisar
+        return conversacion.fallar(unit_of_work, get_channel(), textos, org_id, msg_id,
+                                   f"Falla temporal tras {self.request.retries + 1} intentos: {exc}")
 
 
 @celery_app.task(
