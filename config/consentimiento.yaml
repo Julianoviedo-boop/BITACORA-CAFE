@@ -1,0 +1,41 @@
+# Autorización para el tratamiento de datos personales (Ley 1581 de 2012).
+#
+# Lo que se le dice al productor la primera vez que escribe, y qué respuestas
+# cuentan como SÍ o como NO. Mientras no responda SÍ, ningún mensaje suyo se
+# procesa (no se transcribe, no se extrae nada) y su contenido se borra.
+#
+# {organizacion} se reemplaza por el nombre de la organización.
+# Las respuestas se comparan sin tildes, sin mayúsculas y sin signos:
+# "Sí.", "SI" y "si 👍" cuentan igual que "si".
+#
+# Las respuestas van entre comillas: sin ellas, YAML lee  no  como "falso".
+#
+# IMPORTANTE: el texto legal lo debe revisar el área jurídica de cada organización.
+
+solicitud: |
+  Hola 👋 Le escribe {organizacion}.
+  Para llevar la bitácora de sus lotes de café necesitamos guardar lo que nos mande por aquí (audios, textos y fotos). Solo lo usamos para la historia y la trazabilidad de sus lotes, como dice la Ley 1581 de 2012.
+  Usted puede pedir que corrijamos o borremos sus datos cuando quiera.
+  ¿Nos autoriza? Responda escribiendo SÍ o NO.
+
+aceptado: |
+  ¡Gracias! Quedó autorizado ✅
+  Ya nos puede contar por audio o por texto lo que hizo en su lote.
+
+rechazado: |
+  Entendido. No vamos a guardar sus mensajes.
+  Si cambia de opinión, escriba SÍ.
+
+respuestas_si:
+  - "sí"
+  - "acepto"
+  - "autorizo"
+  - "sí acepto"
+  - "sí autorizo"
+  - "sí señor"
+  - "sí señora"
+
+respuestas_no:
+  - "no"
+  - "no acepto"
+  - "no autorizo"
