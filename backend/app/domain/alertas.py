@@ -19,7 +19,11 @@ Este archivo tiene tres partes:
 
 from __future__ import annotations
 
+import datetime as dt
+import logging
 import string
+import uuid
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -30,7 +34,10 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_valida
 
 from app.config import get_settings
 from app.domain.consentimiento import normalizar
+from app.extraction.prompts import ZONA_COLOMBIA
 from app.extraction.schema import CatalogoEventos, catalogo_por_defecto
+
+logger = logging.getLogger(__name__)
 
 # Llaves que se pueden usar en los mensajes de cada clase de alerta.
 LLAVES_VALOR = frozenset({"lote", "valor", "minimo", "maximo"})
@@ -311,3 +318,241 @@ def validar_al_arrancar() -> None:
     """Se llama al arrancar la API, el worker y beat: si alertas.yaml tiene errores,
     el proceso no arranca y el log dice exactamente qué arreglar."""
     get_reglas()
+
+
+# ---------------------------------------------------------------------------
+# 2. Reglas puras (sin base de datos)
+# ---------------------------------------------------------------------------
+#
+# Reciben eventos con la forma de LotEvent (event_type, occurred_at, data, id,
+# status, confirmed_at). Solo cuentan los confirmados (regla de oro 2).
+
+_FIN = "__fin__"
+
+
+@dataclass(frozen=True)
+class EtapaLote:
+    clave: str
+    # Momento del evento que puso al lote en la etapa.
+    desde: dt.datetime
+    # Desde cuándo se cuentan los plazos (ver momento_para_plazos).
+    desde_plazo: dt.datetime
+
+
+def _orden(ev: Any) -> tuple:
+    # Mismo momento: manda el orden en que se confirmaron (el del mensaje).
+    return (ev.occurred_at, ev.confirmed_at or ev.occurred_at, ev.id)
+
+
+def _confirmados(eventos: Iterable[Any]) -> list[Any]:
+    return sorted((e for e in eventos if e.status == "confirmado"), key=_orden)
+
+
+def _dato(ev: Any, campo: str) -> dict[str, Any] | None:
+    dato = (ev.data or {}).get(campo)
+    return dato if isinstance(dato, dict) else None
+
+
+def _cumple(c: Condicion, ev: Any) -> bool:
+    if ev.event_type != c.evento:
+        return False
+    if c.campo is None:
+        return True
+    texto = (_dato(ev, c.campo) or {}).get("valor")
+    # Comienzo de palabra: "ferment" encuentra "despulpado y fermentación".
+    return isinstance(texto, str) and f" {c.dice_normalizado}" in f" {normalizar(texto)}"
+
+
+def efecto_del_evento(reglas: ReglasAlertas, ev: Any) -> str | None:
+    """La etapa que empieza con el evento, _FIN si saca al lote de su etapa, o None
+    si no cambia nada. Si empiezan varias, gana la que va más abajo en el YAML."""
+    empiezan = [k for k, e in reglas.etapas.items() if any(_cumple(c, ev) for c in e.empieza_con)]
+    if empiezan:
+        return empiezan[-1]
+    if any(_cumple(c, ev) for e in reglas.etapas.values() for c in e.termina_con):
+        return _FIN
+    return None
+
+
+def etapa_del_lote(reglas: ReglasAlertas, eventos: Iterable[Any]) -> EtapaLote | None:
+    """Etapa actual del lote: la dice el último evento confirmado que empieza o
+    termina una etapa. None si no está en ninguna."""
+    actual: EtapaLote | None = None
+    for ev in _confirmados(eventos):
+        efecto = efecto_del_evento(reglas, ev)
+        if efecto == _FIN:
+            actual = None
+        elif efecto is not None:
+            actual = EtapaLote(efecto, ev.occurred_at, momento_para_plazos(ev))
+    return actual
+
+
+def etapa_del_evento(reglas: ReglasAlertas, eventos: Iterable[Any], evento: Any) -> str | None:
+    """Etapa en la que se tomó el dato de `evento`: la que empieza con él o, si no
+    empieza ninguna, en la que estaba el lote justo antes, aunque el evento la
+    termine (la humedad final del secado se midió en el secado)."""
+    efecto = efecto_del_evento(reglas, evento)
+    if efecto not in (None, _FIN):
+        return efecto
+    clave = _orden(evento)
+    etapa = etapa_del_lote(reglas, (e for e in eventos if e.id != evento.id and _orden(e) < clave))
+    return etapa.clave if etapa else None
+
+
+def valor_medido(regla: ReglaValor, ev: Any) -> float | None:
+    """El número del campo de la regla en el evento, o None si no lo trae (o viene
+    en otra unidad que la de la regla)."""
+    dato = _dato(ev, regla.campo)
+    if dato is None:
+        return None
+    valor = dato.get("valor")
+    if isinstance(valor, bool) or not isinstance(valor, int | float):
+        return None
+    if regla.unidad is not None and dato.get("unidad") not in (None, regla.unidad):
+        return None
+    return float(valor)
+
+
+def fuera_de_rango(regla: ReglaValor, valor: float) -> bool:
+    return ((regla.minimo is not None and valor < regla.minimo)
+            or (regla.maximo is not None and valor > regla.maximo))
+
+
+def momento_para_plazos(ev: Any) -> dt.datetime:
+    """Desde cuándo cuenta un evento para las alertas por tiempo.
+
+    Si el productor no dijo la hora, el evento queda a las 00:00 (hora de
+    Colombia). Contar desde ahí haría saltar alertas antes de tiempo ("hoy empecé
+    a fermentar" a las 9 de la mañana sonaría al mediodía). En ese caso se cuenta
+    desde que lo confirmó, sin pasar del final de ese día.
+    """
+    local = ev.occurred_at.astimezone(ZONA_COLOMBIA)
+    if local.timetz().replace(tzinfo=None) != dt.time(0) or ev.confirmed_at is None:
+        return ev.occurred_at
+    fin_del_dia = local + dt.timedelta(days=1)
+    return max(ev.occurred_at, min(ev.confirmed_at, fin_del_dia))
+
+
+def vencimiento(regla: ReglaTiempo, etapa: EtapaLote | None,
+                eventos: Iterable[Any]) -> dt.datetime | None:
+    """Hasta cuándo hay plazo para el evento esperado, o None si la regla no
+    aplica (el lote no está en la etapa). Se cuenta desde el último evento
+    esperado dentro de la etapa o, si no hay, desde que entró a ella."""
+    if etapa is None or etapa.clave != regla.etapa:
+        return None
+    referencia = etapa.desde_plazo
+    for ev in _confirmados(eventos):
+        if ev.event_type == regla.evento_esperado and ev.occurred_at >= etapa.desde:
+            referencia = max(referencia, momento_para_plazos(ev))
+    return referencia + dt.timedelta(hours=regla.horas_limite)
+
+
+def _numero(x: float) -> str:
+    """12.5 -> "12,5"; 40.0 -> "40" (como se escribe en Colombia)."""
+    return f"{x:g}".replace(".", ",")
+
+
+def _nombre_lote(lote: Any) -> str:
+    return lote.name or lote.code
+
+
+def mensaje_por_valor(regla: ReglaValor, lote: Any, valor: float) -> str:
+    vacio = "-"
+    return regla.mensaje.format(
+        lote=_nombre_lote(lote), valor=_numero(valor),
+        minimo=_numero(regla.minimo) if regla.minimo is not None else vacio,
+        maximo=_numero(regla.maximo) if regla.maximo is not None else vacio,
+    )
+
+
+def mensaje_por_tiempo(regla: ReglaTiempo, lote: Any) -> str:
+    return regla.mensaje.format(lote=_nombre_lote(lote), horas=_numero(regla.horas_limite))
+
+
+# ---------------------------------------------------------------------------
+# 3. Casos de uso sobre la base
+# ---------------------------------------------------------------------------
+#
+# Todos reciben `repos` (una transacción abierta) y filtran por organization_id
+# (regla de oro 1). Devuelven los ids de las alertas NUEVAS, para que quien
+# llama las mande por WhatsApp después del commit (tarea enviar_alerta).
+
+
+def revisar_lote(repos: Any, reglas: ReglasAlertas, org_id: uuid.UUID, lote: Any,
+                 ahora: dt.datetime, historia: Sequence[Any] | None = None) -> list[uuid.UUID]:
+    """Abre las alertas por tiempo vencidas del lote y cierra las que ya no aplican."""
+    if historia is None:
+        historia = repos.events.list_by_lot(org_id, lote.id, status="confirmado")
+    etapa = etapa_del_lote(reglas, historia)
+    nuevas: list[uuid.UUID] = []
+
+    for regla in reglas.alertas_por_tiempo:
+        vence = vencimiento(regla, etapa, historia)
+        if vence is not None and ahora >= vence:
+            alerta = repos.alerts.open_if_absent(
+                org_id, lot_id=lote.id, rule_code=regla.codigo,
+                message=mensaje_por_tiempo(regla, lote), due_at=vence,
+            )
+            if alerta is not None:
+                nuevas.append(alerta.id)
+        else:
+            # Llegó el evento esperado o el lote ya no está en la etapa.
+            repos.alerts.resolve_open(org_id, lote.id, regla.codigo)
+
+    if etapa is not None:
+        # El lote volvió a empezar la etapa (otra tanda): las alertas por valor de
+        # la tanda anterior ya no aplican.
+        antes_de_empezar = etapa.desde - dt.timedelta(microseconds=1)
+        for regla in reglas.alertas_por_valor:
+            if regla.etapa == etapa.clave:
+                repos.alerts.resolve_open(org_id, lote.id, regla.codigo,
+                                          due_until=antes_de_empezar)
+    return nuevas
+
+
+def al_confirmar(repos: Any, reglas: ReglasAlertas, org_id: uuid.UUID,
+                 evento_ids: Iterable[uuid.UUID], ahora: dt.datetime) -> list[uuid.UUID]:
+    """Revisa los eventos que el productor acaba de confirmar.
+
+    - Alertas por valor: abre una si el dato quedó fuera del rango; si quedó
+      dentro, cierra la que estaba abierta.
+    - Alertas por tiempo del lote: las revisa de una vez (p. ej. llegó el volteo).
+    Los eventos que no están confirmados se ignoran (regla de oro 2).
+    """
+    eventos = [e for i in evento_ids if (e := repos.events.get(org_id, i)) is not None
+               and e.status == "confirmado" and e.lot_id is not None]
+    nuevas: list[uuid.UUID] = []
+    for lot_id in dict.fromkeys(e.lot_id for e in eventos):
+        lote = repos.lots.get(org_id, lot_id)
+        if lote is None:
+            continue
+        historia = repos.events.list_by_lot(org_id, lot_id, status="confirmado")
+        for ev in sorted((e for e in eventos if e.lot_id == lot_id), key=_orden):
+            etapa = etapa_del_evento(reglas, historia, ev)
+            for regla in reglas.alertas_por_valor:
+                valor = valor_medido(regla, ev) if regla.etapa == etapa else None
+                if valor is None:
+                    continue
+                if fuera_de_rango(regla, valor):
+                    alerta = repos.alerts.open_if_absent(
+                        org_id, lot_id=lot_id, rule_code=regla.codigo, event_id=ev.id,
+                        message=mensaje_por_valor(regla, lote, valor), due_at=ev.occurred_at,
+                    )
+                    if alerta is not None:
+                        nuevas.append(alerta.id)
+                else:
+                    repos.alerts.resolve_open(org_id, lot_id, regla.codigo,
+                                              due_until=ev.occurred_at)
+        nuevas += revisar_lote(repos, reglas, org_id, lote, ahora, historia)
+    return nuevas
+
+
+def revisar_tiempos(repos: Any, reglas: ReglasAlertas, org_id: uuid.UUID,
+                    ahora: dt.datetime) -> list[uuid.UUID]:
+    """Revisión periódica (Celery beat) de los lotes activos de una organización."""
+    if not reglas.alertas_por_tiempo and not reglas.alertas_por_valor:
+        return []
+    nuevas: list[uuid.UUID] = []
+    for lote in repos.lots.list_active(org_id):
+        nuevas += revisar_lote(repos, reglas, org_id, lote, ahora)
+    return nuevas

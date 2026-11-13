@@ -27,7 +27,7 @@ from app.api.webhooks import _procesar
 from app.channels.fake import FakeChannel
 from app.db.models import Conversation, LotEvent
 from app.db.repositories import Repositories, unit_of_work
-from app.domain import conversacion, transcripcion
+from app.domain import alertas, conversacion, transcripcion
 from app.domain.consentimiento import cargar_textos as cargar_textos_consentimiento
 from app.extraction.llm import ClienteLLM
 from app.extraction.prompts import a_hora_colombia
@@ -196,6 +196,8 @@ def mundo(db_session, repos, monkeypatch, textos, catalogo, sim):
     monkeypatch.setattr(transcripcion, "get_reglas",
                         lambda: transcripcion.cargar_reglas(config_dir))
     monkeypatch.setattr(conversacion, "get_textos", lambda: textos)
+    reglas = alertas.cargar_reglas(config_dir, catalogo)
+    monkeypatch.setattr(alertas, "get_reglas", lambda: reglas)
     for clave, valor in (("task_always_eager", True), ("task_eager_propagates", True)):
         monkeypatch.setitem(celery_app.conf, clave, valor)
 

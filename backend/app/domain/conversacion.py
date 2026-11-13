@@ -42,7 +42,7 @@ import re
 import uuid
 from collections.abc import Callable, Sequence
 from contextlib import AbstractContextManager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Literal
@@ -53,6 +53,7 @@ from app.channels import Channel, dentro_de_ventana
 from app.config import get_settings
 from app.db.models import Conversation, InboundMessage, Lot, LotEvent, Organization, Producer
 from app.db.repositories import InvalidTransitionError, Repositories
+from app.domain import alertas
 from app.domain.consentimiento import normalizar
 from app.extraction import extractor
 from app.extraction.extractor import DatoMedido, EventoPropuesto, lotes_activos
@@ -63,6 +64,8 @@ from app.extraction.schema import FALTANTE_FECHA, FALTANTE_LOTE, CatalogoEventos
 logger = logging.getLogger(__name__)
 
 UnitOfWork = Callable[[], AbstractContextManager[Repositories]]
+# Recibe los ids de las alertas nuevas, después del commit (las encola para enviarlas).
+DespacharAlertas = Callable[[list[uuid.UUID]], None]
 
 # Veces que se vuelve a empezar si la conversación cambió mientras se hablaba con Claude.
 MAX_CONFLICTOS = 3
@@ -455,6 +458,9 @@ class _Ctx:
     producer: Producer
     msg: InboundMessage
     ahora: dt.datetime
+    reglas_alertas: alertas.ReglasAlertas | None = None
+    # Alertas abiertas por los eventos que se confirmaron en este mensaje.
+    alertas_nuevas: list[uuid.UUID] = field(default_factory=list)
 
     @property
     def org_id(self) -> uuid.UUID:
@@ -479,12 +485,19 @@ def atender(
     message_id: uuid.UUID,
     *,
     ahora: dt.datetime | None = None,
+    reglas_alertas: alertas.ReglasAlertas | None = None,
+    despachar_alertas: DespacharAlertas | None = None,
 ) -> str:
     """Atiende un mensaje ya listo (texto con consentimiento, o audio transcrito).
 
     Devuelve qué se hizo ("resumen", "pregunta", "confirmado", "omitido"...).
     Lanza ReintentarError si Claude falló de forma temporal.
+
+    Si al confirmar se abren alertas, se le pasan sus ids a `despachar_alertas`
+    después del commit. Sin `reglas_alertas` se usan las de config/alertas.yaml.
     """
+    if reglas_alertas is None:
+        reglas_alertas = alertas.get_reglas()
     for _ in range(MAX_CONFLICTOS):
         with uow() as repos:
             foto = _leer(repos, organization_id, message_id)
@@ -502,10 +515,13 @@ def atender(
             return fallar(uow, channel, textos, organization_id, message_id,
                           f"extraccion: {exc}", ahora=ahora)
 
+        alertas_nuevas: list[uuid.UUID] = []
         with uow() as repos:
             resultado = _aplicar(repos, channel, interprete.catalogo, textos, organization_id,
                                  message_id, foto, accion, referencia, propuesta,
-                                 ahora or dt.datetime.now(dt.UTC))
+                                 ahora or dt.datetime.now(dt.UTC), reglas_alertas, alertas_nuevas)
+        if alertas_nuevas and despachar_alertas is not None and resultado != "conflicto":
+            despachar_alertas(alertas_nuevas)
         if resultado != "conflicto":
             logger.info("conversacion msg=%s estado=%s accion=%s resultado=%s", message_id,
                         foto.estado, accion, resultado)
@@ -546,7 +562,9 @@ def _interpretar(accion: Accion, foto: _Foto,
 def _aplicar(repos: Repositories, channel: Channel, catalogo: CatalogoEventos,
              textos: TextosConversacion, org_id: uuid.UUID, msg_id: uuid.UUID, foto: _Foto,
              accion: Accion, referencia: str | None,
-             propuesta: list[EventoPropuesto] | None, ahora: dt.datetime) -> str:
+             propuesta: list[EventoPropuesto] | None, ahora: dt.datetime,
+             reglas_alertas: alertas.ReglasAlertas | None = None,
+             alertas_nuevas: list[uuid.UUID] | None = None) -> str:
     conv = repos.conversations.get_by_producer(org_id, foto.producer_id, for_update=True)
     if conv is None or conv.version != foto.version:
         return "conflicto"
@@ -559,9 +577,11 @@ def _aplicar(repos: Repositories, channel: Channel, catalogo: CatalogoEventos,
     producer = repos.producers.get(org_id, foto.producer_id)
     assert org is not None and producer is not None
 
-    ctx = _Ctx(repos, channel, textos, catalogo, org, producer, msg, ahora)
+    ctx = _Ctx(repos, channel, textos, catalogo, org, producer, msg, ahora, reglas_alertas)
     estado = _Estado.desde(conv)
     texto, resultado = _ejecutar(ctx, estado, accion, referencia, propuesta)
+    if alertas_nuevas is not None:
+        alertas_nuevas.extend(ctx.alertas_nuevas)
 
     ultimo_entrante = max(t for t in (conv.last_inbound_at, msg.received_at) if t)
     cambios: dict[str, Any] = {
@@ -656,6 +676,7 @@ def _ejecutar(ctx: _Ctx, estado: _Estado, accion: Accion, referencia: str | None
         # Regla de oro 2: el SÍ explícito del productor, después de ver el resumen.
         for evento_id in estado.evento_ids:
             _cambiar_evento(ctx, evento_id, ctx.repos.events.confirm)
+        _revisar_alertas(ctx, estado.evento_ids)
         estado.limpiar()
         return t("confirmado"), "confirmado"
 
@@ -699,6 +720,23 @@ def _ejecutar(ctx: _Ctx, estado: _Estado, accion: Accion, referencia: str | None
     if propuesta:
         estado.borradores = propuesta
     return _avanzar(ctx, estado)
+
+
+def _revisar_alertas(ctx: _Ctx, evento_ids: Sequence[uuid.UUID]) -> None:
+    """Alertas por valor (y por tiempo) de los eventos recién confirmados.
+
+    Un error aquí no puede tumbar la confirmación del productor: se revisa en un
+    savepoint y, si falla, se deshace solo eso y queda en el log.
+    """
+    if ctx.reglas_alertas is None:
+        return
+    try:
+        with ctx.repos.session.begin_nested():
+            ctx.alertas_nuevas += alertas.al_confirmar(ctx.repos, ctx.reglas_alertas, ctx.org_id,
+                                                       evento_ids, ctx.ahora)
+    except Exception:  # noqa: BLE001
+        ctx.alertas_nuevas.clear()
+        logger.exception("conversacion msg=%s no se pudieron revisar las alertas", ctx.msg.id)
 
 
 def _cambiar_evento(ctx: _Ctx, evento_id: uuid.UUID,
