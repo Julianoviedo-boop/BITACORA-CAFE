@@ -35,9 +35,9 @@ Todos los puertos quedan ligados a `127.0.0.1` (no se exponen a la red).
 ## Comprobar que todo funciona
 
 ```bash
-# Salud: revisa base de datos y Redis (200 si todo bien, 503 si algo falla)
+# Salud: revisa base de datos, migraciones y Redis (200 si todo bien, 503 si algo falla)
 curl http://localhost:8000/health
-# {"status":"ok","checks":{"db":"ok","redis":"ok"}}
+# {"status":"ok","checks":{"db":"ok","migraciones":"ok","redis":"ok"}}
 
 # Encolar la tarea "ping" y esperar la respuesta del worker
 docker compose exec api python -c "from app.worker.tasks import ping; print(ping.delay().get(timeout=10))"
@@ -49,8 +49,10 @@ docker compose exec -e REQUIRE_DB_TESTS=1 api pytest
 
 ## Base de datos
 
+La api aplica las migraciones pendientes cada vez que arranca, y `/health` responde 503 si la base no está en la última migración. El worker espera a que la api esté healthy.
+
 ```bash
-docker compose exec api alembic upgrade head          # aplicar migraciones
+docker compose exec api alembic upgrade head          # aplicar migraciones a mano
 docker compose exec api python /scripts/seed.py       # datos de ejemplo (2 organizaciones)
 docker compose exec api alembic revision --autogenerate -m "describa el cambio"
 docker compose exec api alembic check                 # ¿los modelos y las migraciones coinciden?

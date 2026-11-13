@@ -34,12 +34,17 @@ FROM base AS runtime
 COPY --from=builder /opt/venv /opt/venv
 COPY --chown=app:app pyproject.toml ./
 COPY --chown=app:app app ./app
+# Las migraciones van en la imagen: la api las aplica al arrancar y /health las verifica.
+COPY --chown=app:app alembic.ini ./
+COPY --chown=app:app alembic ./alembic
 USER app
 
 # ---------- api (producción, sin recarga) ----------
+# Aplica las migraciones pendientes y luego arranca; si fallan, no arranca.
+# Con varias réplicas de la api, mejor correr las migraciones en un paso aparte.
 FROM runtime AS api
 EXPOSE 8000
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers"]
+CMD ["sh", "-c", "alembic upgrade head && exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --proxy-headers"]
 
 # ---------- worker (Celery) ----------
 FROM runtime AS worker

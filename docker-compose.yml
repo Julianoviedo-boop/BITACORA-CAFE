@@ -30,7 +30,10 @@ services:
       HF_HOME: /home/app/.cache/huggingface
       # En Windows/macOS los eventos de archivos no siempre cruzan el montaje.
       WATCHFILES_FORCE_POLLING: "true"
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload --reload-dir /app/app
+    # Aplica las migraciones pendientes antes de arrancar; si fallan, la API no arranca.
+    command: >-
+      sh -c "alembic upgrade head
+      && exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload --reload-dir /app/app"
     ports:
       - "127.0.0.1:8000:8000"
     healthcheck:
@@ -50,6 +53,14 @@ services:
     build:
       context: ./backend
       target: worker
+    # Espera a que la api quede healthy: así la base ya tiene las migraciones al día.
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      api:
+        condition: service_healthy
 
   web:
     build:
