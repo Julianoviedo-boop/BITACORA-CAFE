@@ -277,7 +277,8 @@ class Conversation(UUIDPrimaryKey, Timestamps, OrganizationScoped, Base):
     # Se pasó al asesor tras demasiadas correcciones o preguntas repetidas.
     advisor_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # Respuesta que no se pudo mandar por estar fuera de la ventana de 24 horas.
-    # PENDIENTE(tarea de alertas): mandarla con una plantilla aprobada.
+    # PENDIENTE: mandarla con una plantilla aprobada (Channel.send_template ya existe;
+    # ver D-017).
     unsent_reply: Mapped[str | None] = mapped_column(Text)
     unsent_reply_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # Sube en cada cambio: si dos workers atienden al mismo productor, el segundo

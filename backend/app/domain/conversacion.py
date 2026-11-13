@@ -613,7 +613,7 @@ def _puede_responder(org: Organization, msg: InboundMessage,
         logger.error("conversacion org=%s sin número de WhatsApp: no se responde", org.id)
         return False
     if not dentro_de_ventana(ultimo_entrante, ahora):
-        # PENDIENTE(tarea de alertas): fuera de la ventana de 24 horas WhatsApp solo
+        # PENDIENTE (D-017): fuera de la ventana de 24 horas WhatsApp solo
         # deja mandar plantillas aprobadas. La respuesta queda en
         # conversations.unsent_reply para que esa tarea la mande con plantilla.
         # Ver app/channels/ventana.py.

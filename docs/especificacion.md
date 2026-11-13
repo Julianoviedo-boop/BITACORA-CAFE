@@ -19,7 +19,12 @@ El caficultor hace muchas labores en sus lotes (abonar, fumigar, desyerbar, reco
    - En cualquier momento puede escribir **MIS LOTES**, **RESUMEN LOTE 3** o **AYUDA**.
    - Ver D-016 y `config/conversacion.yaml`.
 7. **Historia del lote.** Los eventos confirmados forman la línea de tiempo del lote.
-8. **Alertas.** Según `config/alertas.yaml` (ej.: días de carencia tras una fumigación antes de recolectar), se avisa al caficultor.
+8. **Alertas.** Según `config/alertas.yaml`, se avisa al caficultor:
+   - **Por valor:** un dato de un evento confirmado quedó fuera del rango (p. ej. la temperatura de la fermentación).
+   - **Por tiempo:** un lote lleva demasiadas horas en una etapa sin un evento (p. ej. 12 horas fermentando sin volteo).
+   - La etapa del lote sale de sus eventos confirmados. Una alerta no se repite mientras siga abierta.
+   - Dentro de la ventana de 24 horas se le manda un texto; fuera, la plantilla aprobada o, si no hay, queda solo en el panel.
+   - Ver D-017.
 9. **Reporte de trazabilidad.** Desde el panel web se genera el reporte por lote y rango de fechas.
 
 ## 3. Estados de un evento
