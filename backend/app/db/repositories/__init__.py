@@ -18,6 +18,7 @@ from app.db.repositories.base import (
 )
 from app.db.repositories.entities import (
     AlertRepository,
+    ConversationRepository,
     FarmRepository,
     InboundMessageRepository,
     InvalidTransitionError,
@@ -42,6 +43,7 @@ class Repositories:
         self.events = LotEventRepository(session)
         self.alerts = AlertRepository(session)
         self.reports = ReportRepository(session)
+        self.conversations = ConversationRepository(session)
 
 
 @contextmanager
@@ -63,6 +65,7 @@ def unit_of_work(session: Session | None = None) -> Iterator[Repositories]:
 
 __all__ = [
     "AlertRepository",
+    "ConversationRepository",
     "FarmRepository",
     "InboundMessageRepository",
     "InvalidTransitionError",

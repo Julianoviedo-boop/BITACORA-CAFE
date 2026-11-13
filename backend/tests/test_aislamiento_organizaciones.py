@@ -3,7 +3,7 @@ organización B por ningún método del repositorio.
 
 Cómo funciona:
 1. Se crean dos organizaciones con un grafo completo cada una (finca, productor,
-   lote, mensaje, evento, alerta y reporte).
+   lote, mensaje, evento, alerta, reporte y conversación).
 2. Para cada método público de cada repositorio hay uno o más "ataques": se llama
    con organization_id = A apuntando a datos de B.
 3. Después de cada llamada se verifica que:
@@ -51,6 +51,7 @@ class OrgData:
     event_id: uuid.UUID
     alert_id: uuid.UUID
     report_id: uuid.UUID
+    conversation_id: uuid.UUID
 
 
 @dataclass
@@ -80,11 +81,12 @@ def _build_org(repos: Repositories, slug: str, phone: str, lot_code: str) -> Org
     report = repos.reports.add(
         org_id, lot_id=lot.id, date_from=date(2026, 1, 1), date_to=date(2026, 12, 31)
     )
+    conversation = repos.conversations.get_or_create(org_id, producer.id)
     return OrgData(
         org_id=org_id, farm_id=farm.id, producer_id=producer.id, phone=phone,
         lot_id=lot.id, lot_code=lot.code, public_token=lot.public_token,
         message_id=msg.id, external_id=msg.external_id, event_id=event.id,
-        alert_id=alert.id, report_id=report.id,
+        alert_id=alert.id, report_id=report.id, conversation_id=conversation.id,
     )
 
 
@@ -207,6 +209,18 @@ ATTACKS: list[Attack] = [
            lambda w: _a(lot_id=w.b.lot_id, date_from=date(2026, 1, 1), date_to=date(2026, 2, 1)),
            "integridad"),
     Attack("reports", "list_by_lot", "lote de B", lambda w: _a(w.b.lot_id)),
+    # conversations
+    *_generic("conversations", "conversation_id", {"last_prompt": "Hackeada"}),
+    Attack("conversations", "add", "con productor de B",
+           lambda w: _a(producer_id=w.b.producer_id), "integridad"),
+    Attack("conversations", "update", "pasarla a un mensaje de B",
+           lambda w: _a(w.a.conversation_id, source_message_id=w.b.message_id), "integridad"),
+    Attack("conversations", "get_by_producer", "productor de B",
+           lambda w: _a(w.b.producer_id)),
+    Attack("conversations", "get_by_producer", "productor de B con bloqueo",
+           lambda w: _a(w.b.producer_id, for_update=True)),
+    Attack("conversations", "get_or_create", "productor de B",
+           lambda w: _a(w.b.producer_id), "integridad"),
 ]
 
 
@@ -330,7 +344,7 @@ def test_sin_organization_id_valido_falla(
 
 
 @pytest.mark.parametrize("repo", ["farms", "producers", "lots", "messages", "events",
-                                  "alerts", "reports"])
+                                  "alerts", "reports", "conversations"])
 def test_no_se_puede_forzar_organization_id_en_add_ni_update(
     repo: str, world: World, repos: Repositories
 ) -> None:
@@ -341,6 +355,7 @@ def test_no_se_puede_forzar_organization_id_en_add_ni_update(
         "farms": world.a.farm_id, "producers": world.a.producer_id, "lots": world.a.lot_id,
         "messages": world.a.message_id, "events": world.a.event_id,
         "alerts": world.a.alert_id, "reports": world.a.report_id,
+        "conversations": world.a.conversation_id,
     }[repo]
     with pytest.raises(ProtectedFieldError):
         r.update(world.a.org_id, own_id, organization_id=world.b.org_id)
@@ -359,6 +374,9 @@ def test_a_si_ve_lo_suyo(world: World, repos: Repositories) -> None:
     assert [e.id for e in repos.events.list_by_lot(a.org_id, a.lot_id)] == [a.event_id]
     assert [x.id for x in repos.alerts.list_pending(a.org_id)] == [a.alert_id]
     assert [r.id for r in repos.reports.list_by_lot(a.org_id, a.lot_id)] == [a.report_id]
-    for repo in ("farms", "producers", "lots", "messages", "events", "alerts", "reports"):
+    assert repos.conversations.get_by_producer(a.org_id, a.producer_id).id == a.conversation_id
+    assert repos.conversations.get_or_create(a.org_id, a.producer_id).id == a.conversation_id
+    for repo in ("farms", "producers", "lots", "messages", "events", "alerts", "reports",
+                 "conversations"):
         rows = getattr(repos, repo).list(a.org_id)
         assert len(rows) == 1 and rows[0].organization_id == a.org_id, repo

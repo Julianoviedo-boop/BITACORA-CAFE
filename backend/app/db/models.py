@@ -47,6 +47,12 @@ PROCESSING_STATUSES = (
 EVENT_STATUSES = ("pendiente", "confirmado", "rechazado")
 ALERT_STATUSES = ("pendiente", "enviada", "descartada")
 REPORT_STATUSES = ("pendiente", "generado", "error")
+# Conversación con un productor (app/domain/conversacion.py):
+#   libre           -> no hay nada pendiente.
+#   preguntando     -> se le preguntó un dato obligatorio que falta.
+#   ofreciendo_lote -> nombró un lote que no existe y se le ofreció crearlo.
+#   confirmando     -> se le mandó el resumen y se espera SÍ, corrección o CANCELAR.
+CONVERSATION_STATES = ("libre", "preguntando", "ofreciendo_lote", "confirmando")
 
 
 def _in(column: str, values: tuple[str, ...]) -> str:
@@ -169,7 +175,9 @@ class LotEvent(UUIDPrimaryKey, Timestamps, OrganizationScoped, Base):
               postgresql_ops={"data": "jsonb_path_ops"}),
     )
 
-    lot_id: Mapped[uuid.UUID]
+    # Null solo en tipos de evento que no son de un lote (requiere_lote: false en
+    # config/eventos.yaml, p. ej. una venta).
+    lot_id: Mapped[uuid.UUID | None]
     message_id: Mapped[uuid.UUID | None]
     # Tipo definido en config/eventos.yaml (abonada, fumigacion, recoleccion...).
     event_type: Mapped[str] = mapped_column(String(50))
@@ -219,4 +227,48 @@ class Report(UUIDPrimaryKey, Timestamps, OrganizationScoped, Base):
     generated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
-BUSINESS_MODELS = (Farm, Producer, Lot, InboundMessage, LotEvent, Alert, Report)
+class Conversation(UUIDPrimaryKey, Timestamps, OrganizationScoped, Base):
+    """Estado de la conversación con un productor. Vive en la base (no en memoria)
+    para que sobreviva a reinicios del worker; hay una sola fila por productor."""
+
+    __tablename__ = "conversations"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "id"),
+        UniqueConstraint("organization_id", "producer_id"),
+        _same_org_fk("producer_id", "producers"),
+        _same_org_fk("source_message_id", "inbound_messages"),
+        CheckConstraint(_in("state", CONVERSATION_STATES), name="state"),
+        CheckConstraint("correction_rounds >= 0", name="correction_rounds"),
+    )
+
+    producer_id: Mapped[uuid.UUID]
+    state: Mapped[str] = mapped_column(String(20), default="libre", server_default="libre")
+    # Mensaje con el que empezó lo pendiente (los eventos quedan ligados a él).
+    source_message_id: Mapped[uuid.UUID | None]
+    # Eventos propuestos todavía sin confirmar (EventoPropuesto en JSON), en orden.
+    drafts: Mapped[list[Any]] = mapped_column(
+        JSONB, default=list, server_default=text("'[]'::jsonb")
+    )
+    # Ids de los lot_events "pendiente" creados para esos borradores (mismo orden).
+    event_ids: Mapped[list[Any]] = mapped_column(
+        JSONB, default=list, server_default=text("'[]'::jsonb")
+    )
+    # Pregunta abierta: {"indice", "campo", "tipo", "intentos", ...}.
+    question: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    correction_rounds: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    # Lo último que se le preguntó (para recordárselo después de un comando).
+    last_prompt: Mapped[str | None] = mapped_column(Text)
+    # Último mensaje del productor: abre la ventana de 24 horas de WhatsApp.
+    last_inbound_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Se pasó al asesor tras demasiadas correcciones o preguntas repetidas.
+    advisor_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Respuesta que no se pudo mandar por estar fuera de la ventana de 24 horas.
+    # PENDIENTE(tarea de alertas): mandarla con una plantilla aprobada.
+    unsent_reply: Mapped[str | None] = mapped_column(Text)
+    unsent_reply_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Sube en cada cambio: si dos workers atienden al mismo productor, el segundo
+    # nota que el estado cambió mientras hablaba con Claude y vuelve a empezar.
+    version: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+
+
+BUSINESS_MODELS = (Farm, Producer, Lot, InboundMessage, LotEvent, Alert, Report, Conversation)

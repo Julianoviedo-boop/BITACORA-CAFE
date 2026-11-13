@@ -13,6 +13,7 @@ from app.db.models import (
     CONSENT_STATUSES,
     PROCESSING_STATUSES,
     Alert,
+    Conversation,
     Farm,
     InboundMessage,
     Lot,
@@ -299,3 +300,36 @@ class ReportRepository(OrganizationScopedRepository[Report]):
             .order_by(Report.created_at.desc(), Report.id)
         )
         return self.session.scalars(stmt).all()
+
+
+class ConversationRepository(OrganizationScopedRepository[Conversation]):
+    model = Conversation
+    immutable_fields = frozenset({"producer_id"})
+
+    def get_by_producer(
+        self, organization_id: uuid.UUID, producer_id: uuid.UUID, *, for_update: bool = False
+    ) -> Conversation | None:
+        """La conversación del productor. Con for_update, bloquea la fila hasta el
+        final de la transacción (dos workers no la cambian a la vez)."""
+        stmt = self._select(organization_id).where(Conversation.producer_id == producer_id)
+        if for_update:
+            stmt = stmt.with_for_update().execution_options(populate_existing=True)
+        return self.session.scalars(stmt).one_or_none()
+
+    def get_or_create(self, organization_id: uuid.UUID, producer_id: uuid.UUID) -> Conversation:
+        """Devuelve la conversación del productor; la crea vacía si no existe.
+
+        Un productor de otra organización no se puede usar: la FK compuesta
+        (organization_id, producer_id) lo rechaza.
+        """
+        stmt = (
+            insert(Conversation)
+            .values(organization_id=require_org(organization_id), producer_id=producer_id)
+            .on_conflict_do_nothing(
+                index_elements=[Conversation.organization_id, Conversation.producer_id]
+            )
+        )
+        self.session.execute(stmt)
+        conv = self.get_by_producer(organization_id, producer_id)
+        assert conv is not None
+        return conv
