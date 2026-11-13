@@ -107,3 +107,23 @@ Formato: cada decisión tiene fecha, contexto, decisión y consecuencias. Las nu
   5. Consentimiento (Ley 1581 de 2012): mientras el productor no responda SÍ **por escrito**, sus mensajes no se procesan: quedan en `sin_consentimiento`, se borra su contenido y se le vuelve a pedir la autorización. El SÍ o el NO se guarda como constancia. Los textos y las respuestas válidas están en `config/consentimiento.yaml`.
   6. Los mensajes de grupos se ignoran.
 - **Consecuencias:** `WHATSAPP_CHANNEL=fake` permite probar todo sin WhatsApp (`scripts/simular_mensaje.py`). Antes de producción hay que capturar un webhook real con audio e imagen, guardarlo en `tests/fixtures/` y confirmar la descarga.
+
+## D-014 · Transcripción: decodificación propia, modelo por proceso y límite de 3 minutos
+- **Fecha:** 2026-11-12
+- **Contexto:** D-004 eligió faster-whisper `small` en CPU. Al implementarlo y probar con un OGG/Opus real salió que `faster_whisper.decode_audio` (1.2.1, la última versión) llama a `av.open(metadata_errors=...)`, que PyAV 16+ ya no acepta: ningún audio se podía decodificar.
+- **Decisión:**
+  1. El audio se decodifica con PyAV directamente (`app/transcription/whisper.py`, `decodificar`), sin pasar por `decode_audio`. Los frames dañados se saltan.
+  2. El modelo (CPU, `int8`, elegido con `WHISPER_MODEL`) se carga una vez por proceso del worker y se precarga en `worker_process_init`.
+  3. Los audios de más de `max_duracion_segundos` (180, en `config/transcripcion.yaml`) no se transcriben: se le pide al productor que los mande más cortos. Los avisos también están en ese archivo.
+  4. Las fallas temporales de descarga se reintentan 5 veces (30 s a 300 s). Si se acaban, o la falla es definitiva, el mensaje queda en `error` y otra tarea (`avisar_productor`) le avisa al productor, para que una falla al enviar el aviso no obligue a transcribir otra vez.
+  5. Se mantiene `small`. Comparación con `scripts/comparar_whisper.py` (5 audios **sintéticos**, 70,5 s de audio, contenedor con 4 núcleos):
+
+     | Modelo | Tiempo total | Veces el tiempo real | WER | Términos cafeteros | RAM por proceso |
+     |---|---:|---:|---:|---:|---:|
+     | small  | 137,9 s | 1,96 | 0,0 % | 26/26 | ~0,8 GB |
+     | medium | 373,2 s | 5,29 | 0,5 % | 25/26 | ~3,0 GB |
+
+- **Consecuencias:**
+  - Los errores medidos no sirven todavía para decidir: los audios son de voz sintética (es-ES) y casi no tienen errores. Hay que repetir la comparación con audios reales de productores (con su `.txt` de referencia en `backend/tests/fixtures/`).
+  - En esta máquina `small` tarda casi el doble de lo que dura el audio: un audio de 3 minutos tardaría unos 6 minutos. Falta ajustar `WHISPER_CPU_THREADS` frente a `--concurrency` y medir en el servidor de producción.
+  - Con `medium` y `--concurrency=2`, el worker necesitaría unos 6 GB solo para los modelos.
