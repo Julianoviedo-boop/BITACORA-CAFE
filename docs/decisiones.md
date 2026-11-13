@@ -127,3 +127,26 @@ Formato: cada decisión tiene fecha, contexto, decisión y consecuencias. Las nu
   - Los errores medidos no sirven todavía para decidir: los audios son de voz sintética (es-ES) y casi no tienen errores. Hay que repetir la comparación con audios reales de productores (con su `.txt` de referencia en `backend/tests/fixtures/`).
   - En esta máquina `small` tarda casi el doble de lo que dura el audio: un audio de 3 minutos tardaría unos 6 minutos. Falta ajustar `WHISPER_CPU_THREADS` frente a `--concurrency` y medir en el servidor de producción.
   - Con `medium` y `--concurrency=2`, el worker necesitaría unos 6 GB solo para los modelos.
+
+## D-015 · Extracción: esquema genérico de valores, normalización en código y Haiku por defecto
+- **Fecha:** 2026-11-12
+- **Contexto:** D-005 pide salida estructurada con modelos Pydantic generados de `config/eventos.yaml`. La API compila el esquema a una gramática y limita a 24 parámetros opcionales y 16 con tipos unión (cada `X | None` cuenta) en todo el esquema.
+- **Decisión:**
+  1. Cada evento trae los campos comunes (`tipo_evento`, `fragmento`, `lote_mencionado`, `codigo_lote`, `fecha`, `hora`, `faltantes`) y una lista `valores: [{campo, valor, unidad}]`, con `campo`, `unidad` y `faltantes` como enums generados del YAML. Así el esquema tiene 6 uniones y 0 opcionales, y no crece en uniones al agregar campos. Un modelo por tipo de evento con un campo anulable por dato se pasaría del límite.
+  2. La salida de Claude se normaliza en código (`app/extraction/extractor.py`): un `codigo_lote` que no es de un lote activo de la organización queda en null, una fecha posterior al mensaje queda en null, se quitan los campos que no son del tipo, se revisan números y unidades, y `faltantes` se recalcula con los obligatorios del catálogo.
+  3. Solo se le pasan a Claude los lotes activos de la organización del mensaje (`LotRepository.list_active`).
+  4. El texto del productor va dentro de `<mensaje_productor>`, con `<` y `>` neutralizados, y se trata como datos.
+  5. Modelo `claude-haiku-5-5` con esfuerzo `medium` (`ANTHROPIC_MODEL`, `ANTHROPIC_EFFORT`). El system prompt es fijo por catálogo y se cachea.
+- **Consecuencias:**
+  - Medición con `scripts/evaluar_extraccion.py` (Haiku 5.5, `medium`, dos corridas por fila). El grupo `base` (20 casos) se usó para encontrar los errores. El grupo `validacion` (12 casos) se escribió antes de cambiar el prompt, e incluye casos donde las reglas nuevas NO deben aplicar. Cambios al prompt: labores encadenadas heredan lote y fecha, número de lote por código o nombre (ambiguo si los dos apuntan a lotes distintos), y sin referencia de tiempo la fecha es null.
+
+    | Prompt | Grupo | Lote | Fecha | Faltantes | Valores | Inventados |
+    |---|---|---:|---:|---:|---:|---:|
+    | inicial | base | 87 % / 87 % | 100 % / 100 % | 87 % / 87 % | 100 % | 0 |
+    | inicial | validacion | 75 % / 81 % | 88 % / 94 % | 62 % / 75 % | 100 % | 0 |
+    | con cambios | base | 100 % / 100 % | 100 % / 100 % | 100 % / 100 % | 100 % | 0 |
+    | con cambios | validacion | 100 % / 100 % | 100 % / 100 % | 100 % / 100 % | 100 % | 0 |
+
+    Con `low` y el prompt nuevo: fecha 100 % (con el inicial asumía "hoy"), lote 92 % (no resuelve números por código). Se queda `medium`. Unos US$ 0,004 a 0,008 por corrida de 32 casos con caché.
+  - Con 100 % en los dos grupos, el set ya no distingue entre versiones del prompt: hace falta agregar casos más difíciles antes del próximo ajuste.
+  - Esa medición es optimista: `eventos.yaml` y los casos son un borrador escrito por el equipo de desarrollo y los textos son las referencias de los audios sintéticos, no transcripciones reales. Hay que agregar mensajes reales de productores.
