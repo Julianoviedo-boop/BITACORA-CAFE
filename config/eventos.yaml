@@ -20,6 +20,7 @@
 #           obligatorio: true | false   (por defecto false)
 #           unidades: [..]              (solo numero; claves de "unidades" abajo)
 #           descripcion: qué es y cómo lo dice el productor
+#           pregunta: lo que se le pregunta al productor si falta (obligatorios)
 #
 # Un mismo nombre de campo puede estar en varios tipos, pero con el mismo "tipo".
 # La fecha y el lote son comunes a todos los eventos y no se declaran aquí.
@@ -60,11 +61,13 @@ tipos:
         tipo: texto
         obligatorio: true
         descripcion: Nombre o fórmula del abono tal como lo dijo (p. ej. "17-6-18", "cal dolomita").
+        pregunta: ¿Qué abono echaste? Por ejemplo, 17-6-18, DAP o urea.
       cantidad:
         tipo: numero
         obligatorio: true
         unidades: [bulto, kg, g, arroba]
         descripcion: Cantidad total aplicada en el lote.
+        pregunta: ¿Cuánto abono echaste en total? Por ejemplo, 4 bultos.
       dosis:
         tipo: numero
         unidades: [g_por_planta, kg_por_surco, bulto_por_surco]
@@ -84,6 +87,7 @@ tipos:
         tipo: texto
         obligatorio: true
         descripcion: Nombre comercial o ingrediente del producto aplicado.
+        pregunta: ¿Qué producto aplicaste?
       objetivo:
         tipo: texto
         descripcion: Plaga, enfermedad o maleza que se quería controlar (broca, roya...).
@@ -128,6 +132,7 @@ tipos:
         obligatorio: true
         unidades: [kg, arroba]
         descripcion: Café cereza recogido.
+        pregunta: ¿Cuánto café cereza recogieron? En kilos o arrobas.
       recolectores:
         tipo: numero
         unidades: [persona]
@@ -146,6 +151,7 @@ tipos:
         tipo: texto
         obligatorio: true
         descripcion: Etapa o etapas hechas (despulpado, fermentación, lavado).
+        pregunta: ¿Qué le hiciste al café? Despulpado, fermentación o lavado.
       cantidad:
         tipo: numero
         unidades: [kg, arroba]
@@ -164,6 +170,7 @@ tipos:
         obligatorio: true
         unidades: [kg, arroba, carga]
         descripcion: Café pergamino seco que quedó.
+        pregunta: ¿Cuánto café seco quedó? En kilos, arrobas o cargas.
       metodo:
         tipo: texto
         descripcion: Dónde o cómo se secó (marquesina, patio, silo).
@@ -182,6 +189,7 @@ tipos:
         obligatorio: true
         unidades: [kg, arroba, carga]
         descripcion: Cantidad vendida.
+        pregunta: ¿Cuánto café vendiste? En kilos, arrobas o cargas.
       tipo_cafe:
         tipo: texto
         descripcion: Qué café vendió (pergamino seco, cereza, pasilla).
@@ -203,6 +211,7 @@ tipos:
         tipo: texto
         obligatorio: true
         descripcion: Plaga o enfermedad observada.
+        pregunta: ¿Qué plaga o enfermedad viste?
       afectacion:
         tipo: texto
         descripcion: Cuánto o dónde (p. ej. "varias matas en la parte de abajo").
