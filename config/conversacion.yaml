@@ -1,0 +1,150 @@
+# Conversación con el productor por WhatsApp (app/domain/conversacion.py).
+#
+# Flujo: mensaje -> (transcripción) -> extracción -> se pregunta lo que falte, de a
+# un dato -> resumen de una línea por evento -> el productor confirma, corrige o
+# cancela. Nada queda confirmado sin su SÍ.
+#
+# Las respuestas y los comandos se comparan sin tildes, sin mayúsculas y sin
+# signos: "Sí.", "SI" y "si 👍" cuentan igual que "si". Van entre comillas: sin
+# ellas, YAML lee  no / si  como verdadero o falso.
+#
+# En los textos, lo que va entre llaves ({evento}, {lote}...) lo llena el sistema.
+
+# Correcciones permitidas después del resumen. Si quiere cambiar algo más, se le
+# pide hablar con el asesor. También es el máximo de veces que se repite la misma
+# pregunta por un dato que falta.
+max_rondas: 3
+
+respuestas:
+  confirmar:
+    - "sí"
+    - "sí señor"
+    - "sí señora"
+    - "sí está bien"
+    - "sí, todo bien"
+    - "está bien"
+    - "todo bien"
+    - "correcto"
+    - "confirmo"
+    - "sí confirmo"
+    - "listo"
+    - "ok"
+    - "dale"
+    - "de acuerdo"
+    - "así es"
+    - "eso es"
+    - "perfecto"
+  negar:
+    - "no"
+    - "no señor"
+    - "no señora"
+    - "no está bien"
+    - "está mal"
+  cancelar:
+    - "cancelar"
+    - "cancela"
+    - "cancelado"
+    - "cancélalo"
+    - "cancele"
+    - "borrar"
+    - "borra"
+    - "bórralo"
+    - "borra eso"
+    - "olvídalo"
+    - "olvídelo"
+    - "no guardes nada"
+    - "no guarde nada"
+
+comandos:
+  mis_lotes:
+    - "mis lotes"
+    - "ver mis lotes"
+    - "ver lotes"
+    - "lotes"
+  ayuda:
+    - "ayuda"
+    - "menú"
+    - "qué puedo hacer"
+  # Prefijos: lo que sigue es el lote ("resumen lote 3", "resumen La Esperanza").
+  # Si después del prefijo viene un texto largo, no es un comando sino un reporte
+  # ("resumen de la semana: el lunes abonamos...").
+  resumen:
+    - "resumen del lote"
+    - "resumen lote"
+    - "resumen de"
+    - "resumen"
+
+# Preguntas por los datos comunes a todos los eventos. Las de cada campo están
+# en config/eventos.yaml (pregunta:). Si un campo obligatorio no tiene pregunta,
+# se usa "generica" ({campo} es el nombre del campo).
+preguntas:
+  lote: "¿En qué lote fue? Dime el nombre o el número."
+  fecha: "¿Qué día fue? Por ejemplo, hoy, ayer o el lunes."
+  generica: "¿Me dices {campo}?"
+
+# Cómo se escriben las unidades en el resumen: [singular, plural] o un solo texto.
+# Las que no estén aquí se escriben como en config/eventos.yaml.
+unidades:
+  bulto: ["bulto", "bultos"]
+  kg: "kg"
+  g: "g"
+  arroba: ["arroba", "arrobas"]
+  carga: ["carga", "cargas"]
+  litro: ["litro", "litros"]
+  cc: "cc"
+  caneca: ["caneca", "canecas"]
+  jornal: ["jornal", "jornales"]
+  persona: ["persona", "personas"]
+  hora: ["hora", "horas"]
+  dia: ["día", "días"]
+  porcentaje: "%"
+  g_por_planta: "g por planta"
+  kg_por_surco: "kg por surco"
+  bulto_por_surco: ["bulto por surco", "bultos por surco"]
+  cc_por_caneca: "cc por caneca"
+  litro_por_caneca: ["litro por caneca", "litros por caneca"]
+  g_por_caneca: "g por caneca"
+  peso_por_kg: "pesos el kilo"
+  peso_por_arroba: "pesos la arroba"
+  peso_por_carga: "pesos la carga"
+  peso: "pesos"
+
+textos:
+  # Resumen para confirmar. {evento} es una línea: "Lote 3: abonada, hoy 7:30 a.m., 4 bultos, 17-6-18"
+  confirmar_uno: "{evento}. ¿Está bien? Responde SÍ o dime qué cambiar."
+  confirmar_varios: |
+    Entendí esto:
+    {eventos}
+    ¿Está bien? Responde SÍ o dime qué cambiar.
+  # Pregunta por un dato que falta. {evento}: "Abonada en Lote 3".
+  pregunta_dato: "{evento}: {pregunta}"
+  ofrecer_lote: "No encontré el lote «{lote}» en tu lista. ¿Quieres que lo cree? Responde SÍ, o dime el nombre o el número del lote."
+  lote_creado: "Listo, creé el lote «{lote}»."
+  confirmado: "Listo ✅ Quedó guardado en la historia del lote."
+  cancelado: "Listo, no guardé nada. Cuando quieras me vuelves a contar."
+  nada_pendiente: "No tienes nada pendiente por confirmar. Cuéntame por audio o por texto lo que hiciste en tu lote."
+  que_cambiar: "¿Qué quieres cambiar? Dímelo por audio o por texto. Si no quieres guardar nada, escribe CANCELAR."
+  no_entendi: |
+    No te entendí bien 😕 ¿Me lo cuentas otra vez? Por ejemplo: «Hoy abonamos el lote 3 con 4 bultos de 17-6-18».
+    Escribe AYUDA para ver qué más puedo hacer.
+  no_entendi_correccion: "No entendí qué cambiar 😕 Dímelo de otra forma. Si todo está bien, responde SÍ; si no quieres guardar nada, escribe CANCELAR."
+  asesor: "Mejor revisemos esto con tu asesor 🙏 Le dejamos lo que me contaste para que te ayude. Si quieres, empieza de nuevo contándome la labor."
+  error: "Tuvimos un problema para entender tu mensaje 😕 ¿Me lo mandas otra vez en un rato?"
+  solo_audio_texto: "Por ahora solo entiendo audios y mensajes de texto 🙏 Cuéntame por ahí lo que hiciste en tu lote."
+  recordatorio: "Sigo esperando tu respuesta: {pregunta}"
+  ayuda: |
+    Mándame un audio o un texto con lo que hiciste en tu lote. Por ejemplo: «Hoy abonamos el lote 3 con 4 bultos de 17-6-18».
+    También puedes escribir:
+    • MIS LOTES: ver tus lotes
+    • RESUMEN LOTE 3: ver lo último que se hizo en un lote
+    • CANCELAR: borrar lo que esté pendiente
+  mis_lotes: |
+    Tus lotes:
+    {lotes}
+  sin_lotes: "Todavía no tienes lotes registrados. Cuéntame lo que hiciste y te ayudo a crear el lote."
+  resumen: |
+    {lote}, últimos registros:
+    {eventos}
+  resumen_vacio: "{lote} todavía no tiene registros confirmados."
+  resumen_sin_lote: "¿De qué lote quieres el resumen? Por ejemplo: RESUMEN LOTE 3."
+  lote_no_encontrado: "No encontré el lote «{lote}». Escribe MIS LOTES para ver tus lotes."
