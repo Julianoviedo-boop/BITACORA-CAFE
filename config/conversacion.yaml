@@ -98,6 +98,7 @@ unidades:
   hora: ["hora", "horas"]
   dia: ["día", "días"]
   porcentaje: "%"
+  grado_celsius: "°C"
   g_por_planta: "g por planta"
   kg_por_surco: "kg por surco"
   bulto_por_surco: ["bulto por surco", "bultos por surco"]

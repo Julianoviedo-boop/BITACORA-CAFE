@@ -1,0 +1,127 @@
+# Alertas de los lotes (app/domain/alertas.py).
+#
+# ⚠️  VALORES PROVISIONALES (2026-11-13): sirven para probar el motor. Los
+#     valores definitivos los valida Brayan antes de usarlos con productores.
+#
+# Hay dos clases de alerta:
+#   1. Por valor:  un dato de un evento CONFIRMADO quedó fuera del rango.
+#                  Ej.: el café se midió a 42 °C en fermentación.
+#   2. Por tiempo: un lote lleva demasiadas horas en una etapa sin que se
+#                  registre un evento. Ej.: 12 horas fermentando sin volteo.
+#
+# Una alerta no se repite mientras siga abierta. Se cierra sola así:
+#   - por tiempo: cuando llega el evento que faltaba o el lote sale de la etapa;
+#   - por valor:  cuando una medición posterior queda dentro del rango, o cuando
+#                 el lote vuelve a empezar esa etapa (otra tanda de café).
+# Después de cerrada, puede volver a saltar.
+#
+# Los nombres de eventos y campos (volteo, humedad...) son los de
+# config/eventos.yaml. Si uno está mal escrito, el sistema no arranca y dice
+# cuál es.
+#
+# En los mensajes, lo que va entre llaves lo llena el sistema:
+#   {lote}    nombre del lote
+#   {valor}   el dato medido               (solo alertas por valor)
+#   {minimo}  {maximo}  el rango permitido  (solo alertas por valor)
+#   {horas}   las horas de horas_limite     (solo alertas por tiempo)
+# Escriba los números con punto: 12.5 (no 12,5).
+
+
+# ---------------------------------------------------------------------------
+# Etapas: cómo sabe el sistema en qué va cada lote
+# ---------------------------------------------------------------------------
+# Nadie tiene que marcar la etapa a mano: sale de los eventos confirmados.
+#
+#   empieza_con: eventos que ponen al lote en esta etapa.
+#   termina_con: eventos que sacan al lote de cualquier etapa (queda sin etapa).
+#
+# Cada condición dice el evento y, si hace falta, qué debe decir uno de sus
+# campos de texto. No importan tildes ni mayúsculas, y basta con el comienzo de
+# la palabra: "ferment" sirve para fermentación, fermentado y fermentando.
+#     - evento: beneficio
+#       campo: etapa
+#       dice: ferment
+#
+# Manda el último evento que cumpla alguna condición. Si un mismo evento cumple
+# varias (p. ej. "fermentación y lavado"), gana la etapa que esté más abajo en
+# esta lista; por eso van en el orden del proceso.
+
+etapas:
+  fermentacion:
+    empieza_con:
+      - evento: beneficio
+        campo: etapa
+        dice: ferment
+
+  secado:
+    empieza_con:
+      - evento: beneficio
+        campo: etapa
+        dice: lav
+    # El evento "secado" se registra cuando el café ya está seco.
+    termina_con:
+      - evento: secado
+
+
+# ---------------------------------------------------------------------------
+# Alertas por valor
+# ---------------------------------------------------------------------------
+#   etapa:   en qué etapa debe estar el lote cuando se tomó el dato.
+#   campo:   el dato numérico que se revisa (de config/eventos.yaml).
+#   minimo / maximo: el rango permitido. Puede faltar uno de los dos.
+#   mensaje: lo que se le manda al productor.
+
+alertas_por_valor:
+  - etapa: fermentacion
+    campo: temperatura
+    minimo: 18.0
+    maximo: 40.0
+    mensaje: "¡Alerta en fermentación! La temperatura del lote {lote} está fuera del rango seguro ({valor}°C)."
+
+  - etapa: secado
+    campo: humedad
+    minimo: 10.0
+    maximo: 12.5
+    mensaje: "¡Precaución en secado! La humedad del lote {lote} se encuentra en {valor}%, fuera de la norma de exportación."
+
+
+# ---------------------------------------------------------------------------
+# Alertas por tiempo
+# ---------------------------------------------------------------------------
+#   etapa:           en qué etapa debe estar el lote.
+#   evento_esperado: el evento que se debe registrar (de config/eventos.yaml).
+#   horas_limite:    cuántas horas pueden pasar sin ese evento. Se cuentan
+#                    desde el último evento esperado o, si no hay ninguno,
+#                    desde que el lote entró a la etapa.
+#   mensaje:         lo que se le manda al productor.
+#
+# El sistema revisa estas alertas cada 30 minutos (ALERTAS_REVISION_MINUTOS en
+# el .env), así que una alerta puede llegar hasta media hora después del límite.
+
+alertas_por_tiempo:
+  - etapa: fermentacion
+    evento_esperado: volteo
+    horas_limite: 12
+    mensaje: "¡Lote descuidado! El lote {lote} lleva más de {horas} horas sin registrar un volteo en la etapa de fermentación."
+
+  - etapa: secado
+    evento_esperado: medicion_humedad
+    horas_limite: 48
+    mensaje: "¡Atención! El lote {lote} lleva más de {horas} horas sin medición de humedad en la etapa de secado."
+
+
+# ---------------------------------------------------------------------------
+# Plantilla de WhatsApp
+# ---------------------------------------------------------------------------
+# WhatsApp solo deja mandar texto libre hasta 24 horas después del último
+# mensaje del productor. Pasado ese tiempo, solo se puede mandar una plantilla
+# aprobada por Meta.
+#
+#   nombre: nombre de la plantilla aprobada. La plantilla debe tener una sola
+#           variable, {{1}}, donde va el mensaje de la alerta.
+#           Vacío: fuera de las 24 horas la alerta queda solo en el panel.
+#   idioma: código de idioma con el que se aprobó la plantilla (p. ej. es).
+
+plantilla:
+  nombre: ""
+  idioma: "es"

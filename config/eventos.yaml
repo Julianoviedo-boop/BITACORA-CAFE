@@ -39,6 +39,7 @@ unidades:
   hora: horas
   dia: días
   porcentaje: porcentaje
+  grado_celsius: grados centígrados (°C)
   g_por_planta: gramos por planta
   kg_por_surco: kilos por surco
   bulto_por_surco: bultos por surco
@@ -219,3 +220,45 @@ tipos:
         tipo: numero
         unidades: [porcentaje]
         descripcion: Porcentaje de infestación, solo si lo midió.
+
+  # --- PROVISIONALES (2026-11-13) -------------------------------------------
+  # Agregados para que funcionen las alertas provisionales de config/alertas.yaml.
+  # Pendientes de revisar con Brayan: nombres, descripciones y si de verdad son
+  # eventos aparte o datos de "beneficio" y "secado".
+
+  volteo:
+    nombre: Volteo
+    descripcion: >-
+      Voltear, revolver o mover el café mientras se fermenta (en el tanque o la
+      caneca). No es lo mismo que mover el café en el secador.
+    campos:
+      temperatura:
+        tipo: numero
+        unidades: [grado_celsius]
+        descripcion: Temperatura de la masa, solo si la midió.
+
+  medicion_fermentacion:
+    nombre: Medición de la fermentación
+    descripcion: >-
+      El productor midió cómo va la fermentación (temperatura de la masa). Si
+      además volteó el café, es un volteo con temperatura, no este evento.
+    campos:
+      temperatura:
+        tipo: numero
+        obligatorio: true
+        unidades: [grado_celsius]
+        descripcion: Temperatura de la masa en fermentación.
+        pregunta: ¿A cuántos grados estaba el café? Por ejemplo, 25 grados.
+
+  medicion_humedad:
+    nombre: Medición de humedad
+    descripcion: >-
+      El productor midió la humedad del café mientras se seca (con medidor o
+      prueba). Si es la humedad final al terminar el secado, va en secado.
+    campos:
+      humedad:
+        tipo: numero
+        obligatorio: true
+        unidades: [porcentaje]
+        descripcion: Humedad del grano medida.
+        pregunta: ¿Cuánta humedad marcó el café? Por ejemplo, 11,5 por ciento.
