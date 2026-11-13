@@ -24,6 +24,11 @@ services:
       - hf_cache:/home/app/.cache/huggingface
     restart: unless-stopped
 
+  beat:
+    volumes: !override
+      - ./config:/config:ro
+    restart: unless-stopped
+
   web:
     build:
       target: prod

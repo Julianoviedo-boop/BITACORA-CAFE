@@ -25,6 +25,7 @@ Todos los puertos quedan ligados a `127.0.0.1` (no se exponen a la red).
 | api | http://localhost:8000 · [docs](http://localhost:8000/docs) | FastAPI con recarga automática |
 | web | http://localhost:3000 | Panel en Next.js |
 | worker | — | Celery (misma imagen base que la api, etapa `worker`) |
+| beat | — | Celery beat: revisa las alertas por tiempo cada 30 min (uno solo) |
 | db | localhost:5432 | PostgreSQL (volumen `pg_data`) |
 | redis | localhost:6379 | Broker y resultados de Celery |
 | adminer | http://localhost:8081 | Ver la base de datos (servidor: `db`) |

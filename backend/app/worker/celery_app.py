@@ -23,4 +23,13 @@ celery_app.conf.update(
     worker_prefetch_multiplier=1,
     broker_connection_retry_on_startup=True,
     result_expires=3600,
+    beat_schedule={
+        # Alertas por tiempo (app/domain/alertas.py). Si una revisión no alcanza a
+        # correr antes de la siguiente, se descarta: no se acumulan.
+        "revisar-alertas-por-tiempo": {
+            "task": "revisar_alertas_por_tiempo",
+            "schedule": settings.alertas_revision_minutos * 60,
+            "options": {"expires": settings.alertas_revision_minutos * 60},
+        },
+    },
 )

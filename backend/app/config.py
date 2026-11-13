@@ -3,6 +3,7 @@
 from functools import lru_cache
 from typing import Literal
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -20,6 +21,9 @@ class Settings(BaseSettings):
 
     # Carpeta con eventos.yaml, alertas.yaml, consentimiento.yaml y vocabulario.txt
     config_dir: str = "/config"
+
+    # Cada cuántos minutos Celery beat revisa las alertas por tiempo (config/alertas.yaml).
+    alertas_revision_minutos: int = Field(default=30, ge=1, le=24 * 60)
 
     # --- Canal de WhatsApp ---
     # "openbsp" habla con OpenBSP de verdad; "fake" no envía nada (desarrollo y pruebas).

@@ -62,6 +62,23 @@ services:
       api:
         condition: service_healthy
 
+  # Celery beat: programa las tareas periódicas (alertas por tiempo). Debe haber
+  # UNO solo; si hubiera dos, cada revisión correría dos veces (no repite
+  # alertas, pero trabaja doble).
+  beat:
+    <<: *backend
+    build:
+      context: ./backend
+      target: worker
+    command: >-
+      celery -A app.worker.celery_app:celery_app beat --loglevel=INFO
+      --schedule /tmp/celerybeat-schedule
+    depends_on:
+      redis:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+
   web:
     build:
       context: ./web

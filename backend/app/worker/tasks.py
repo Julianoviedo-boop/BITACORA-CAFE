@@ -6,10 +6,11 @@ import uuid
 from functools import lru_cache
 from pathlib import Path
 
-from celery.signals import worker_process_init
+from celery.signals import beat_init, worker_init, worker_process_init
 
 from app.channels import ChannelTemporaryError, get_channel
 from app.db.repositories import unit_of_work
+from app.db.repositories.routing import list_organization_ids
 from app.domain import alertas, conversacion, transcripcion
 from app.domain.consentimiento import atender_mensaje, get_textos
 from app.extraction.llm import ClienteLLM
@@ -39,6 +40,20 @@ def precargar_modelo(**_: object) -> None:
         whisper.prompt_desde_config()
     except Exception:  # noqa: BLE001
         logger.exception("No se pudo precargar el modelo de whisper")
+
+
+@worker_init.connect
+@beat_init.connect
+def validar_configuracion(**_: object) -> None:
+    """Si config/alertas.yaml tiene errores, el worker y beat no arrancan.
+
+    Celery atrapa las excepciones de las señales y sigue; SystemExit no la atrapa.
+    """
+    try:
+        alertas.validar_al_arrancar()
+    except Exception as exc:  # noqa: BLE001
+        logger.critical("No se puede arrancar: %s", exc)
+        raise SystemExit(1) from exc
 
 
 @celery_app.task(name="ping")
@@ -186,3 +201,31 @@ def enviar_alerta(organization_id: str, alert_id: str) -> str:
         return alertas.enviar(repos, get_channel(), alertas.get_reglas(),
                               uuid.UUID(organization_id), uuid.UUID(alert_id),
                               dt.datetime.now(dt.UTC))
+
+
+@celery_app.task(name="revisar_alertas_por_tiempo")
+def revisar_alertas_por_tiempo() -> dict[str, int]:
+    """Celery beat: abre las alertas por tiempo vencidas y cierra las que ya no
+    aplican, organización por organización (cada una en su transacción: si una
+    falla, las demás siguen). Las alertas nuevas se encolan para enviarlas."""
+    reglas = alertas.get_reglas()
+    ahora = dt.datetime.now(dt.UTC)
+    with unit_of_work() as repos:
+        org_ids = list_organization_ids(repos.session)
+
+    resumen = {"organizaciones": 0, "alertas_nuevas": 0, "errores": 0}
+    for org_id in org_ids:
+        try:
+            with unit_of_work() as repos:
+                nuevas = alertas.revisar_tiempos(repos, reglas, org_id, ahora)
+        except Exception:  # noqa: BLE001
+            logger.exception("alertas org=%s no se pudieron revisar", org_id)
+            resumen["errores"] += 1
+            continue
+        resumen["organizaciones"] += 1
+        resumen["alertas_nuevas"] += len(nuevas)
+        for alerta_id in nuevas:
+            enviar_alerta.delay(str(org_id), str(alerta_id))
+    if resumen["alertas_nuevas"] or resumen["errores"]:
+        logger.info("alertas por tiempo: %s", resumen)
+    return resumen
