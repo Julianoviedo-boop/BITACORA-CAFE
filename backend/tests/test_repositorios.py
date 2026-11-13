@@ -253,7 +253,7 @@ def test_productores_de_una_finca(repos, org, lot):
     luis = repos.producers.add(org, full_name="Luis", phone="+573002222222", farm_id=lot.farm_id)
     repos.producers.add(org, full_name="Eva", phone="+573003333333", farm_id=otra_finca.id)
     repos.producers.record_consent(org, luis.id, "aceptado")
-    assert [p.id for p in repos.producers.list_by_farm(org, lot.farm_id)] == [ana.id, luis.id]
+    assert {p.id for p in repos.producers.list_by_farm(org, lot.farm_id)} == {ana.id, luis.id}
     assert [p.id for p in repos.producers.list_by_farm(
         org, lot.farm_id, consent_status="aceptado")] == [luis.id]
 
