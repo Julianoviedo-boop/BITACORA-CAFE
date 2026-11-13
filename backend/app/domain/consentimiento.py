@@ -109,8 +109,11 @@ def atender_mensaje(
         return "sin_productor"
 
     if producer.consent_status == "aceptado":
-        # Aquí se conectarán la transcripción y la extracción. El mensaje sigue
-        # en "recibido" para esa etapa.
+        # El mensaje sigue en "recibido" para la siguiente etapa: los audios pasan
+        # por la transcripción (app/domain/transcripcion.py); los textos, directo
+        # a la extracción.
+        if msg.message_type == "audio":
+            return "listo_para_transcribir"
         return "listo_para_procesar"
 
     org = repos.organizations.get(organization_id)
