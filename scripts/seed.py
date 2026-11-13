@@ -25,6 +25,8 @@ DATOS = [
     {
         "slug": "asocafe-huila",
         "name": "Asociación de Caficultores del Sur del Huila",
+        # Número receptor ficticio (en OpenBSP sería el phone_number_id real).
+        "whatsapp_address": "100000000000001",
         "fincas": [
             {
                 "name": "El Mirador",
@@ -59,6 +61,7 @@ DATOS = [
     {
         "slug": "cafe-sierra-nevada",
         "name": "Cooperativa Café Sierra Nevada",
+        "whatsapp_address": "100000000000002",
         "fincas": [
             {
                 "name": "La Victoria",
@@ -85,9 +88,15 @@ DATOS = [
 
 def seed_organization(repos: Repositories, data: dict) -> tuple[uuid.UUID, bool]:
     org_id = uuid.uuid5(SEED_NAMESPACE, data["slug"])
-    if repos.organizations.get(org_id) is not None:
+    existing = repos.organizations.get(org_id)
+    if existing is not None:
+        # Bases sembradas antes de que existiera el número receptor.
+        if existing.whatsapp_address is None:
+            repos.organizations.update(org_id, whatsapp_address=data["whatsapp_address"])
         return org_id, False
-    repos.organizations.create(org_id, name=data["name"], slug=data["slug"])
+    repos.organizations.create(
+        org_id, name=data["name"], slug=data["slug"], whatsapp_address=data["whatsapp_address"]
+    )
     for finca in data["fincas"]:
         farm = repos.farms.add(
             org_id,

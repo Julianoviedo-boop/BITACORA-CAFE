@@ -38,8 +38,12 @@ from app.db.base import Base, OrganizationScoped, Timestamps, UUIDPrimaryKey
 # agronómicas; esas viven en config/*.yaml).
 CONSENT_STATUSES = ("pendiente", "aceptado", "revocado")
 LOT_STATUSES = ("activo", "inactivo")
-MESSAGE_TYPES = ("texto", "audio", "otro")
-PROCESSING_STATUSES = ("recibido", "transcrito", "extraido", "procesado", "error")
+MESSAGE_TYPES = ("texto", "audio", "imagen", "otro")
+# sin_consentimiento: llegó antes de que el productor aceptara el tratamiento de
+# datos; no se procesa y se le borra el contenido.
+PROCESSING_STATUSES = (
+    "recibido", "transcrito", "extraido", "procesado", "sin_consentimiento", "error"
+)
 EVENT_STATUSES = ("pendiente", "confirmado", "rechazado")
 ALERT_STATUSES = ("pendiente", "enviada", "descartada")
 REPORT_STATUSES = ("pendiente", "generado", "error")
@@ -68,6 +72,10 @@ class Organization(UUIDPrimaryKey, Timestamps, Base):
 
     name: Mapped[str] = mapped_column(String(200))
     slug: Mapped[str] = mapped_column(String(80), unique=True)
+    # Número de WhatsApp que recibe los mensajes de esta organización, tal como lo
+    # identifica el canal: en OpenBSP es `organization_address`, el phone_number_id
+    # de Meta (no el teléfono). Con él se sabe a qué organización va cada mensaje.
+    whatsapp_address: Mapped[str | None] = mapped_column(String(64), unique=True)
 
 
 class Farm(UUIDPrimaryKey, Timestamps, OrganizationScoped, Base):
@@ -134,7 +142,8 @@ class InboundMessage(UUIDPrimaryKey, Timestamps, OrganizationScoped, Base):
     from_phone: Mapped[str] = mapped_column(String(20))
     message_type: Mapped[str] = mapped_column(String(10))
     text_body: Mapped[str | None] = mapped_column(Text)
-    media_ref: Mapped[str | None] = mapped_column(String(512))
+    # Referencia del archivo en el canal (p. ej. internal://media/... en OpenBSP).
+    media_ref: Mapped[str | None] = mapped_column(Text)
     transcription: Mapped[str | None] = mapped_column(Text)
     processing_status: Mapped[str] = mapped_column(
         String(20), default="recibido", server_default="recibido"

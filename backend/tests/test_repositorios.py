@@ -39,6 +39,14 @@ def lot(repos: Repositories, org: uuid.UUID):
 
 # --- organizaciones ---
 
+def test_numero_receptor_unico_entre_organizaciones(repos, org, db_session):
+    repos.organizations.update(org, whatsapp_address="100000000000099")
+    otra = uuid.uuid4()
+    with pytest.raises(IntegrityError), db_session.begin_nested():
+        repos.organizations.create(otra, name="Otra", slug=f"otra-{otra.hex[:8]}",
+                                   whatsapp_address="100000000000099")
+
+
 def test_organizacion_solo_permite_editar_nombre_y_slug(repos, org):
     assert repos.organizations.update(org, name="Nuevo nombre").name == "Nuevo nombre"
     with pytest.raises(ProtectedFieldError):
@@ -124,6 +132,24 @@ def test_estado_de_procesamiento(repos, org):
     assert (msg.processing_status, msg.error_detail) == ("error", "sin audio")
     with pytest.raises(ValueError):
         repos.messages.set_processing_status(org, msg.id, "inventado")
+
+
+def test_estado_con_expected_es_condicional(repos, org):
+    msg, _ = repos.messages.add_if_new(org, "wamid.1", from_phone="+57300", message_type="texto")
+    tomado = repos.messages.set_processing_status(org, msg.id, "procesado", expected="recibido")
+    assert tomado.processing_status == "procesado"
+    # Un segundo worker ya no lo encuentra en "recibido".
+    assert repos.messages.set_processing_status(org, msg.id, "error", expected="recibido") is None
+    assert repos.messages.get(org, msg.id).processing_status == "procesado"
+    with pytest.raises(ValueError):
+        repos.messages.set_processing_status(org, msg.id, "error", expected="inventado")
+
+
+def test_tipos_imagen_y_sin_consentimiento(repos, org):
+    msg, _ = repos.messages.add_if_new(org, "wamid.img", from_phone="+57300", message_type="imagen",
+                                       media_ref="internal://media/" + "x" * 600)
+    msg = repos.messages.set_processing_status(org, msg.id, "sin_consentimiento")
+    assert (msg.message_type, msg.processing_status) == ("imagen", "sin_consentimiento")
 
 
 # --- eventos (regla de oro 2) ---

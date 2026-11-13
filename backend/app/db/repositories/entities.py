@@ -5,7 +5,7 @@ from collections.abc import Sequence
 from datetime import UTC, datetime
 from typing import Any, ClassVar
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
@@ -40,7 +40,7 @@ def _now() -> datetime:
 class OrganizationRepository:
     """La organización es la raíz: su propio id es el organization_id."""
 
-    _editable: ClassVar[frozenset[str]] = frozenset({"name", "slug"})
+    _editable: ClassVar[frozenset[str]] = frozenset({"name", "slug", "whatsapp_address"})
 
     def __init__(self, session: Session) -> None:
         self.session = session
@@ -49,8 +49,20 @@ class OrganizationRepository:
         stmt = select(Organization).where(Organization.id == require_org(organization_id))
         return self.session.scalars(stmt).one_or_none()
 
-    def create(self, organization_id: uuid.UUID, *, name: str, slug: str) -> Organization:
-        org = Organization(id=require_org(organization_id), name=name, slug=slug)
+    def create(
+        self,
+        organization_id: uuid.UUID,
+        *,
+        name: str,
+        slug: str,
+        whatsapp_address: str | None = None,
+    ) -> Organization:
+        org = Organization(
+            id=require_org(organization_id),
+            name=name,
+            slug=slug,
+            whatsapp_address=whatsapp_address,
+        )
         self.session.add(org)
         self.session.flush()
         return org
@@ -177,16 +189,33 @@ class InboundMessageRepository(OrganizationScopedRepository[InboundMessage]):
         status: str,
         *,
         error_detail: str | None = None,
+        expected: str | None = None,
     ) -> InboundMessage | None:
+        """Cambia el estado de procesamiento.
+
+        Con `expected`, el cambio es atómico y solo ocurre si el mensaje está en ese
+        estado (devuelve None si no). Sirve para que dos workers no atiendan el
+        mismo mensaje.
+        """
         if status not in PROCESSING_STATUSES:
             raise ValueError(f"Estado de procesamiento inválido: {status!r}")
-        msg = self.get(organization_id, id)
-        if msg is None:
+        if expected is not None and expected not in PROCESSING_STATUSES:
+            raise ValueError(f"Estado de procesamiento inválido: {expected!r}")
+        stmt = (
+            update(InboundMessage)
+            .where(
+                InboundMessage.organization_id == require_org(organization_id),
+                InboundMessage.id == id,
+            )
+            .values(processing_status=status, error_detail=error_detail)
+            .returning(InboundMessage.id)
+            .execution_options(synchronize_session="fetch")
+        )
+        if expected is not None:
+            stmt = stmt.where(InboundMessage.processing_status == expected)
+        if self.session.execute(stmt).scalar_one_or_none() is None:
             return None
-        msg.processing_status = status
-        msg.error_detail = error_detail
-        self.session.flush()
-        return msg
+        return self.get(organization_id, id)
 
 
 class LotEventRepository(OrganizationScopedRepository[LotEvent]):
