@@ -132,6 +132,15 @@ class LotRepository(OrganizationScopedRepository[Lot]):
         stmt = self._select(organization_id).where(Lot.code == code)
         return self.session.scalars(stmt).one_or_none()
 
+    def list_active(self, organization_id: uuid.UUID) -> Sequence[Lot]:
+        stmt = (
+            self._select(organization_id)
+            .where(Lot.status == "activo")
+            .order_by(Lot.code)
+            .limit(self.max_limit)
+        )
+        return self.session.scalars(stmt).all()
+
     def get_by_public_token(self, organization_id: uuid.UUID, token: str) -> Lot | None:
         stmt = self._select(organization_id).where(Lot.public_token == token)
         return self.session.scalars(stmt).one_or_none()

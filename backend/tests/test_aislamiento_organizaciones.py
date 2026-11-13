@@ -168,6 +168,7 @@ ATTACKS: list[Attack] = [
     Attack("lots", "get_by_code", "código de B", lambda w: _a("ESP-01")),
     Attack("lots", "get_by_public_token", "token de B", lambda w: _a(w.b.public_token)),
     Attack("lots", "list_by_farm", "finca de B", lambda w: _a(w.b.farm_id)),
+    Attack("lots", "list_active", "lotes activos de A", lambda w: _a()),
     Attack("lots", "regenerate_public_token", "lote de B", lambda w: _a(w.b.lot_id)),
     # inbound_messages
     *_generic("messages", "message_id", {"transcription": "Hackeada"}),
