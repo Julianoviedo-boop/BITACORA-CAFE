@@ -1,0 +1,212 @@
+# Tipos de evento de un lote de café y sus campos.
+#
+# BORRADOR v1 (2026-11-12): armado a partir de docs/especificacion.md, D-010 y los
+# audios de prueba. Debe revisarlo alguien que conozca el trabajo en finca.
+#
+# De aquí salen, sin tocar código:
+#   - los modelos Pydantic de la extracción (app/extraction/schema.py),
+#   - el catálogo de eventos que se le explica a Claude (app/extraction/prompts.py),
+#   - qué se le pregunta al productor cuando falta un dato ("obligatorio: true").
+#
+# Estructura:
+#   tipos:
+#     <clave>:                    # minúsculas, sin tildes ni espacios (va a la base)
+#       nombre: texto para el productor ("Abonada")
+#       descripcion: qué cuenta como este evento (lo lee Claude)
+#       requiere_lote: si el evento siempre es de un lote (por defecto true)
+#       campos:
+#         <campo>:
+#           tipo: numero | texto
+#           obligatorio: true | false   (por defecto false)
+#           unidades: [..]              (solo numero; claves de "unidades" abajo)
+#           descripcion: qué es y cómo lo dice el productor
+#
+# Un mismo nombre de campo puede estar en varios tipos, pero con el mismo "tipo".
+# La fecha y el lote son comunes a todos los eventos y no se declaran aquí.
+
+unidades:
+  bulto: bulto (50 kg)
+  kg: kilogramos
+  g: gramos
+  arroba: arroba (12,5 kg)
+  carga: carga (125 kg)
+  litro: litros
+  cc: centímetros cúbicos
+  caneca: canecas (tanques de fumigar)
+  jornal: jornales
+  persona: personas
+  hora: horas
+  dia: días
+  porcentaje: porcentaje
+  g_por_planta: gramos por planta
+  kg_por_surco: kilos por surco
+  bulto_por_surco: bultos por surco
+  cc_por_caneca: cc por caneca
+  litro_por_caneca: litros por caneca
+  g_por_caneca: gramos por caneca
+  peso_por_kg: pesos por kilo
+  peso_por_arroba: pesos por arroba
+  peso_por_carga: pesos por carga
+  peso: pesos (total)
+
+tipos:
+  abonada:
+    nombre: Abonada
+    descripcion: >-
+      Aplicación de abono, fertilizante o enmienda al suelo (17-6-18, DAP, urea,
+      cal dolomita, gallinaza). "Encalar" y "echar cal" también son abonada.
+    campos:
+      insumo:
+        tipo: texto
+        obligatorio: true
+        descripcion: Nombre o fórmula del abono tal como lo dijo (p. ej. "17-6-18", "cal dolomita").
+      cantidad:
+        tipo: numero
+        obligatorio: true
+        unidades: [bulto, kg, g, arroba]
+        descripcion: Cantidad total aplicada en el lote.
+      dosis:
+        tipo: numero
+        unidades: [g_por_planta, kg_por_surco, bulto_por_surco]
+        descripcion: Cantidad por planta o por surco, si la dijo así.
+      jornales:
+        tipo: numero
+        unidades: [jornal, persona]
+        descripcion: Jornales o trabajadores que hicieron la labor.
+
+  fumigacion:
+    nombre: Fumigación
+    descripcion: >-
+      Aplicación de insecticida, fungicida o herbicida con bomba o caneca. Una
+      fumigación para matar maleza también va aquí (no en desyerba).
+    campos:
+      producto:
+        tipo: texto
+        obligatorio: true
+        descripcion: Nombre comercial o ingrediente del producto aplicado.
+      objetivo:
+        tipo: texto
+        descripcion: Plaga, enfermedad o maleza que se quería controlar (broca, roya...).
+      dosis:
+        tipo: numero
+        unidades: [cc_por_caneca, litro_por_caneca, g_por_caneca]
+        descripcion: Cuánto producto por caneca.
+      volumen:
+        tipo: numero
+        unidades: [caneca, litro]
+        descripcion: Cuántas canecas o litros de mezcla se aplicaron en total.
+      dias_carencia:
+        tipo: numero
+        unidades: [dia]
+        descripcion: Días de carencia del producto, solo si los dijo.
+      jornales:
+        tipo: numero
+        unidades: [jornal, persona]
+        descripcion: Jornales o trabajadores que hicieron la labor.
+
+  desyerba:
+    nombre: Desyerba
+    descripcion: >-
+      Control manual o mecánico de maleza: desyerba, plateo, guadañada, machete.
+      Si en el mismo mensaje se dicen varias de estas labores para el mismo lote y
+      el mismo día, es UN solo evento de desyerba.
+    campos:
+      metodo:
+        tipo: texto
+        descripcion: Cómo se hizo (guadaña, machete, plateo a mano...).
+      jornales:
+        tipo: numero
+        unidades: [jornal, persona]
+        descripcion: Jornales o trabajadores que hicieron la labor.
+
+  recoleccion:
+    nombre: Recolección
+    descripcion: Cosecha de café en cereza (graneo, traviesa, pase, repase).
+    campos:
+      cantidad_cereza:
+        tipo: numero
+        obligatorio: true
+        unidades: [kg, arroba]
+        descripcion: Café cereza recogido.
+      recolectores:
+        tipo: numero
+        unidades: [persona]
+        descripcion: Número de recolectores.
+      pase:
+        tipo: texto
+        descripcion: Tipo de pase si lo dijo (graneo, traviesa, repase).
+
+  beneficio:
+    nombre: Beneficio
+    descripcion: >-
+      Proceso del café después de recogerlo: despulpado, fermentación, lavado.
+      Varias etapas dichas juntas para el mismo café son UN solo evento.
+    campos:
+      etapa:
+        tipo: texto
+        obligatorio: true
+        descripcion: Etapa o etapas hechas (despulpado, fermentación, lavado).
+      cantidad:
+        tipo: numero
+        unidades: [kg, arroba]
+        descripcion: Cantidad de café procesado.
+      horas_fermentacion:
+        tipo: numero
+        unidades: [hora]
+        descripcion: Horas de fermentación, si las dijo.
+
+  secado:
+    nombre: Secado
+    descripcion: Secado del café pergamino (marquesina, patio, silo, elva).
+    campos:
+      cantidad_seco:
+        tipo: numero
+        obligatorio: true
+        unidades: [kg, arroba, carga]
+        descripcion: Café pergamino seco que quedó.
+      metodo:
+        tipo: texto
+        descripcion: Dónde o cómo se secó (marquesina, patio, silo).
+      humedad:
+        tipo: numero
+        unidades: [porcentaje]
+        descripcion: Humedad final del grano, si la midió.
+
+  venta:
+    nombre: Venta
+    descripcion: Venta de café a una cooperativa, comprador o trilladora.
+    requiere_lote: false
+    campos:
+      cantidad:
+        tipo: numero
+        obligatorio: true
+        unidades: [kg, arroba, carga]
+        descripcion: Cantidad vendida.
+      tipo_cafe:
+        tipo: texto
+        descripcion: Qué café vendió (pergamino seco, cereza, pasilla).
+      precio:
+        tipo: numero
+        unidades: [peso_por_kg, peso_por_arroba, peso_por_carga, peso]
+        descripcion: Precio, solo si lo dijo.
+      comprador:
+        tipo: texto
+        descripcion: A quién le vendió (cooperativa, comprador...).
+
+  monitoreo_sanitario:
+    nombre: Revisión de plagas y enfermedades
+    descripcion: >-
+      El productor vio una plaga o enfermedad en el lote (roya, broca, mancha de
+      hierro, gotera...). Es lo que observó, no lo que piensa hacer.
+    campos:
+      problema:
+        tipo: texto
+        obligatorio: true
+        descripcion: Plaga o enfermedad observada.
+      afectacion:
+        tipo: texto
+        descripcion: Cuánto o dónde (p. ej. "varias matas en la parte de abajo").
+      porcentaje:
+        tipo: numero
+        unidades: [porcentaje]
+        descripcion: Porcentaje de infestación, solo si lo midió.
