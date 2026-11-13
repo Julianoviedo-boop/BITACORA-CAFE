@@ -14,6 +14,7 @@ from app.channels.base import (
     Media,
     MediaNotAvailableError,
 )
+from app.channels.ventana import VENTANA_ATENCION, dentro_de_ventana
 from app.config import get_settings
 
 
@@ -36,5 +37,7 @@ __all__ = [
     "IncomingMessage",
     "Media",
     "MediaNotAvailableError",
+    "VENTANA_ATENCION",
+    "dentro_de_ventana",
     "get_channel",
 ]
