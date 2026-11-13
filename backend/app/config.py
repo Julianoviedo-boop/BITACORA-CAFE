@@ -50,6 +50,12 @@ class Settings(BaseSettings):
     # (--concurrency) conviene que hilos x procesos no pase de los núcleos.
     whisper_cpu_threads: int = 0
 
+    # --- Extracción (API de Claude) ---
+    # La llave va en ANTHROPIC_API_KEY y la lee directamente el SDK de Anthropic.
+    anthropic_model: str = "claude-haiku-5-5"
+    # Cuánto piensa el modelo antes de responder: low | medium | high | xhigh | max.
+    anthropic_effort: Literal["low", "medium", "high", "xhigh", "max"] = "medium"
+
 
 @lru_cache
 def get_settings() -> Settings:
