@@ -85,3 +85,25 @@ Formato: cada decisión tiene fecha, contexto, decisión y consecuencias. Las nu
 - **Contexto:** La especificación inicial tenía `borrador`, `pendiente_confirmacion`, `confirmado` y `descartado`.
 - **Decisión:** Se simplifica a tres estados. El evento nace `pendiente`; solo `LotEventRepository.confirm()` o `reject()` lo cambian, una sola vez, y el estado no se puede asignar con `add()` ni `update()` (regla de oro 2). Los datos faltantes se preguntan antes de crear el evento.
 - **Consecuencias:** Corregir un evento rechazado se hace creando uno nuevo, lo que deja rastro de ambos.
+
+## D-013 · Conexión con OpenBSP: autenticación, formato y consentimiento
+- **Fecha:** 2026-11-12
+- **Fuentes:** README.md, MIGRATING_FROM_TWILIO.md e INTEGRATING.md de `matiasbattocchia/open-bsp-api`. Donde la documentación no alcanza se revisó el código fuente y se dice explícitamente.
+- **Lo que dice la documentación:**
+  - OpenBSP hace `POST {entity, action, data}`; `data` es la fila de `messages` tal cual. El webhook también llega con los mensajes propios (`sender_address` null) y, si se suscribe `update`, con los cambios de estado.
+  - Para enviar se inserta en `/rest/v1/messages` con los headers `apikey` (llave pública) y `api-key` (llave secreta). `organization_address` es el phone_number_id de Meta, no el teléfono; `conversation_address` va en E.164 sin `+`.
+  - Un archivo es `content = {type: "file", kind: "audio" | "image" | ..., file: {mime_type, uri, name, size}, text}`. **Ese ejemplo es para ENVIAR**; no hay ejemplo de un audio o una imagen entrante.
+  - Sobre la descarga, MIGRATING_FROM_TWILIO.md solo dice que `content.file.uri` "apunta a una URL firmada de Storage".
+  - Autenticación del webhook: si al registrarlo se le pone `token`, llega `Authorization: Bearer <token>`. **No hay firma (HMAC) documentada.**
+- **Lo que muestra el código (no está documentado):**
+  - El aviso sale de un trigger (`notify_webhook`) con `pg_net`: manda la fila cruda, **una sola vez, sin reintentos y sin firma**.
+  - En la fila, `file.uri` es `internal://media/organizations/<org>/attachments/<hash>`, no una URL firmada. Esto contradice MIGRATING_FROM_TWILIO.md.
+  - La política RLS de `storage.objects` deja descargar con el `api-key` de la organización. La ruta de descarga (`/storage/v1/object/authenticated/media/<llave>`) se dedujo de eso y de la ruta de subida que sí está documentada. **Hay que comprobarla con un audio real.**
+- **Decisión:**
+  1. Autenticación: un secreto de 32 caracteres o más en la URL (`/webhooks/openbsp/<OPENBSP_WEBHOOK_SECRET>`), comparado en tiempo constante. Si se configura `OPENBSP_WEBHOOK_TOKEN`, también se exige el `Bearer`. El secreto se borra de los logs de acceso de uvicorn.
+  2. Como OpenBSP no reintenta, el webhook responde 200 a todo aviso auténtico, aunque lo ignore. Si Redis falla al encolar, el mensaje queda guardado en `recibido` (falta una tarea que recoja esos mensajes).
+  3. La organización se identifica por el número receptor (`organizations.whatsapp_address`). Es una búsqueda sin `organization_id`, como excepción explícita (`app/db/repositories/routing.py`) que solo devuelve el id. Si el número no es de ninguna organización, no se guarda nada. Si el teléfono no es de un productor registrado, tampoco.
+  4. Se descargan `internal://media/...` y URLs https del mismo host que `OPENBSP_BASE_URL`. Cualquier otra referencia se rechaza (así nadie nos hace descargar de cualquier URL).
+  5. Consentimiento (Ley 1581 de 2012): mientras el productor no responda SÍ **por escrito**, sus mensajes no se procesan: quedan en `sin_consentimiento`, se borra su contenido y se le vuelve a pedir la autorización. El SÍ o el NO se guarda como constancia. Los textos y las respuestas válidas están en `config/consentimiento.yaml`.
+  6. Los mensajes de grupos se ignoran.
+- **Consecuencias:** `WHATSAPP_CHANNEL=fake` permite probar todo sin WhatsApp (`scripts/simular_mensaje.py`). Antes de producción hay que capturar un webhook real con audio e imagen, guardarlo en `tests/fixtures/` y confirmar la descarga.

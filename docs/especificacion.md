@@ -5,7 +5,7 @@ El caficultor hace muchas labores en sus lotes (abonar, fumigar, desyerbar, reco
 
 ## 2. Flujo principal
 1. **Mensaje entrante.** El caficultor manda un audio o un texto por WhatsApp, por ejemplo: *"Hoy abonamos el lote La Esperanza con 4 bultos de 17-6-18"*.
-2. **Webhook.** OpenBSP llama al webhook. El webhook valida la firma, guarda el mensaje crudo con su `message_id` (para no procesarlo dos veces), encola una tarea en Celery y responde `200` de inmediato.
+2. **Webhook.** OpenBSP llama al webhook. El webhook valida el secreto de la URL (OpenBSP no firma sus avisos, ver D-013), identifica la organización por el número que recibió el mensaje, guarda el mensaje crudo con su `external_id` (para no procesarlo dos veces), encola una tarea en Celery y responde `200` de inmediato. Si el productor todavía no ha autorizado el tratamiento de datos, se le pide la autorización y no se procesa nada hasta que responda SÍ.
 3. **Transcripción.** Si es audio, el worker lo descarga y lo transcribe con faster-whisper (CPU, modelo small), usando `config/vocabulario.txt` como pista de términos cafeteros.
 4. **Extracción.** El texto se envía a Claude con salida estructurada. Los tipos de evento y sus campos se definen en `config/eventos.yaml`. Resultado: tipo de evento, lote, fecha, insumos, cantidades, unidades y campos faltantes.
 5. **Resolución del lote.** Se busca el lote dentro de la organización del usuario (por nombre o alias). Si no se encuentra o hay varios parecidos, se le pregunta.
