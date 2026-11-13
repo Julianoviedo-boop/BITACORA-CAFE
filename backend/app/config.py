@@ -1,12 +1,14 @@
 """Configuración leída exclusivamente de variables de entorno (.env)."""
 
 from functools import lru_cache
+from typing import Literal
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(extra="ignore")
+    # env_ignore_empty: una variable vacía en el .env (FOO=) usa el valor por defecto.
+    model_config = SettingsConfigDict(extra="ignore", env_ignore_empty=True)
 
     app_env: str = "development"
     log_level: str = "INFO"
@@ -16,8 +18,28 @@ class Settings(BaseSettings):
     celery_broker_url: str = "redis://redis:6379/0"
     celery_result_backend: str = "redis://redis:6379/1"
 
-    # Carpeta con eventos.yaml, alertas.yaml y vocabulario.txt
+    # Carpeta con eventos.yaml, alertas.yaml, consentimiento.yaml y vocabulario.txt
     config_dir: str = "/config"
+
+    # --- Canal de WhatsApp ---
+    # "openbsp" habla con OpenBSP de verdad; "fake" no envía nada (desarrollo y pruebas).
+    whatsapp_channel: Literal["openbsp", "fake"] = "fake"
+
+    # OpenBSP (ver docs/decisiones.md, D-013)
+    openbsp_base_url: str = ""
+    # Header `apikey`: llave pública (publishable) de Supabase.
+    openbsp_publishable_key: str = ""
+    # Header `api-key`: llave secreta de la organización en OpenBSP.
+    openbsp_api_key: str = ""
+    # Id de NUESTRA organización dentro de OpenBSP (va en cada mensaje que se envía).
+    openbsp_organization_id: str = ""
+    # Secreto largo que va en la URL del webhook: /webhooks/openbsp/<secreto>.
+    openbsp_webhook_secret: str = ""
+    # Opcional: el `token` del webhook en OpenBSP; llega como `Authorization: Bearer <token>`.
+    openbsp_webhook_token: str = ""
+
+    # Canal falso: carpeta de donde se leen los audios/imágenes "fixture://<nombre>".
+    fake_media_dir: str = "tests/fixtures"
 
 
 @lru_cache
