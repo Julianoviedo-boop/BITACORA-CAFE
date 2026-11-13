@@ -76,12 +76,20 @@ def test_atender_conversacion_llama_al_dominio(monkeypatch):
     import uuid
 
     llamadas = []
-    tasks, _ = _tarea_conversacion(monkeypatch, lambda *a: llamadas.append(a) or "resumen")
+    tasks, _ = _tarea_conversacion(
+        monkeypatch, lambda *a, **kw: llamadas.append((a, kw)) or "resumen")
     org, msg = uuid.uuid4(), uuid.uuid4()
     assert tasks.atender_conversacion.apply(args=(str(org), str(msg))).get() == "resumen"
-    [(uow, canal, interprete, textos, org_id, msg_id)] = llamadas
+    [((uow, canal, interprete, textos, org_id, msg_id), kw)] = llamadas
     assert (canal, interprete, textos, org_id, msg_id) == ("canal", "interprete", "textos", org, msg)
     assert uow is tasks.unit_of_work
+
+    # Las alertas que se abran al confirmar se encolan para enviarlas.
+    encoladas = []
+    monkeypatch.setattr(tasks.enviar_alerta, "delay", lambda *a: encoladas.append(a))
+    alerta = uuid.uuid4()
+    kw["despachar_alertas"]([alerta])
+    assert encoladas == [(str(org), str(alerta))]
 
 
 def test_atender_conversacion_reintenta_y_al_final_avisa(monkeypatch):
@@ -91,7 +99,7 @@ def test_atender_conversacion_reintenta_y_al_final_avisa(monkeypatch):
 
     intentos = []
 
-    def caido(*a):
+    def caido(*a, **kw):
         intentos.append(a)
         raise ReintentarError("Claude no responde")
 
@@ -110,10 +118,35 @@ def test_atender_conversacion_con_el_canal_caido_no_avisa(monkeypatch):
 
     from app.channels import ChannelTemporaryError
 
-    def caido(*a):
+    def caido(*a, **kw):
         raise ChannelTemporaryError("503")
 
     tasks, fallos = _tarea_conversacion(monkeypatch, caido)
     with pytest.raises(ChannelTemporaryError):
         tasks.atender_conversacion.apply(args=(str(uuid.uuid4()), str(uuid.uuid4()))).get()
     assert fallos == []
+
+
+def test_enviar_alerta_llama_al_dominio(monkeypatch):
+    import uuid
+
+    from app.domain import alertas
+    from app.worker import tasks
+
+    llamadas = []
+    monkeypatch.setattr(tasks, "get_channel", lambda: "canal")
+    monkeypatch.setattr(tasks, "unit_of_work", _uow_falso)
+    monkeypatch.setattr(alertas, "get_reglas", lambda: "reglas")
+    monkeypatch.setattr(alertas, "enviar", lambda *a: llamadas.append(a) or "enviada")
+    org, alerta = uuid.uuid4(), uuid.uuid4()
+    assert tasks.enviar_alerta.name == "enviar_alerta"
+    assert tasks.enviar_alerta.apply(args=(str(org), str(alerta))).get() == "enviada"
+    [(repos, canal, reglas, org_id, alerta_id, ahora)] = llamadas
+    assert (repos, canal, reglas, org_id, alerta_id) == ("repos", "canal", "reglas", org, alerta)
+    assert ahora.tzinfo is not None
+
+
+def _uow_falso():
+    from contextlib import nullcontext
+
+    return nullcontext("repos")

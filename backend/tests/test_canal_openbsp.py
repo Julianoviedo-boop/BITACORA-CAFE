@@ -238,3 +238,50 @@ def test_descarga_rechaza_archivos_muy_grandes():
     grande = b"0" * (MAX_MEDIA_BYTES + 1)
     with pytest.raises(MediaNotAvailableError, match="grande"):
         _canal(lambda r: httpx.Response(200, content=grande)).download_media("internal://media/a/b")
+
+
+# --- send_template ---
+
+
+def test_send_template_usa_la_forma_de_los_tipos_de_openbsp():
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["url"] = str(request.url)
+        seen["body"] = json.loads(request.content)
+        return httpx.Response(201)
+
+    _canal(handler).send_template("100000000000001", "+573101234501", "alerta_lote", "es",
+                                  ["La humedad del lote\nLa Esperanza   está en 14%"])
+
+    assert seen["url"] == f"{BASE}/rest/v1/messages"
+    assert seen["body"]["conversation_address"] == "573101234501"
+    assert seen["body"]["content"] == {
+        "version": "1", "type": "data", "kind": "template",
+        "data": {
+            "name": "alerta_lote",
+            "language": {"code": "es", "policy": "deterministic"},
+            # Meta no acepta saltos de línea ni espacios seguidos en las variables.
+            "components": [{"type": "body", "parameters": [
+                {"type": "text", "text": "La humedad del lote La Esperanza está en 14%"}]}],
+        },
+    }
+
+
+def test_send_template_sin_variables_no_manda_components():
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["body"] = json.loads(request.content)
+        return httpx.Response(201)
+
+    _canal(handler).send_template("1", "+573101234501", "recordatorio", "es", [])
+    assert "components" not in seen["body"]["content"]["data"]
+
+
+def test_send_template_errores_como_send_text():
+    with pytest.raises(ChannelTemporaryError):
+        _canal(lambda r: httpx.Response(502)).send_template("1", "+573101234501", "x", "es", ["y"])
+    with pytest.raises(ChannelError) as exc:
+        _canal(lambda r: httpx.Response(400)).send_template("1", "+573101234501", "x", "es", ["y"])
+    assert not isinstance(exc.value, ChannelTemporaryError)

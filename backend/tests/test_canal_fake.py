@@ -6,7 +6,7 @@ import pytest
 
 from app import channels
 from app.channels.base import MediaNotAvailableError
-from app.channels.fake import FakeChannel, SentText
+from app.channels.fake import FakeChannel, SentTemplate, SentText
 from app.channels.openbsp import OpenBSPChannel
 from app.config import Settings
 
@@ -33,6 +33,13 @@ def test_no_lee_fuera_de_la_carpeta(canal, ref):
 def test_send_text_no_envia_y_guarda(canal):
     canal.send_text("100000000000001", "+573101234501", "Hola")
     assert canal.sent == [SentText("100000000000001", "+573101234501", "Hola")]
+
+
+def test_send_template_no_envia_y_guarda(canal):
+    canal.send_template("100000000000001", "+573101234501", "alerta_lote", "es", ["Ojo"])
+    assert canal.templates == [
+        SentTemplate("100000000000001", "+573101234501", "alerta_lote", "es", ("Ojo",))]
+    assert canal.sent == []
 
 
 def test_entiende_el_formato_de_openbsp(canal):

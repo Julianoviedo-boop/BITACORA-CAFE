@@ -6,6 +6,7 @@ tipos de este archivo; los detalles de cada proveedor viven en su módulo
 """
 
 from abc import ABC, abstractmethod
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, Literal
 
@@ -63,4 +64,16 @@ class Channel(ABC):
 
     @abstractmethod
     def send_text(self, channel_address: str, to_phone: str, text: str) -> None:
-        """Envía un texto desde el número `channel_address` al teléfono E.164 `to_phone`."""
+        """Envía un texto desde el número `channel_address` al teléfono E.164 `to_phone`.
+
+        Solo dentro de la ventana de 24 horas (ver ventana.py)."""
+
+    @abstractmethod
+    def send_template(
+        self, channel_address: str, to_phone: str, template: str, language: str,
+        params: Sequence[str],
+    ) -> None:
+        """Envía una plantilla aprobada por Meta; sirve fuera de la ventana de 24 horas.
+
+        `params` llenan, en orden, las variables {{1}}, {{2}}... del cuerpo.
+        """

@@ -32,6 +32,7 @@ from typing import Any
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
+from app.channels import Channel, ChannelError, ChannelTemporaryError, dentro_de_ventana
 from app.config import get_settings
 from app.domain.consentimiento import normalizar
 from app.extraction.prompts import ZONA_COLOMBIA
@@ -556,3 +557,57 @@ def revisar_tiempos(repos: Any, reglas: ReglasAlertas, org_id: uuid.UUID,
     for lote in repos.lots.list_active(org_id):
         nuevas += revisar_lote(repos, reglas, org_id, lote, ahora)
     return nuevas
+
+
+def enviar(repos: Any, channel: Channel, reglas: ReglasAlertas, org_id: uuid.UUID,
+           alerta_id: uuid.UUID, ahora: dt.datetime) -> str:
+    """Le manda la alerta a los productores de la finca del lote que autorizaron
+    el tratamiento de datos.
+
+    A cada uno, según su ventana de 24 horas (último mensaje que nos mandó):
+      - dentro: texto normal;
+      - fuera:  la plantilla aprobada, si está en config/alertas.yaml;
+                si no hay plantilla, a ese productor no se le manda.
+    Si no le llegó a nadie, la alerta sigue "pendiente": queda solo en el panel.
+
+    Devuelve "enviada", "solo_panel" u "omitida" (ya no está pendiente: se cerró o
+    ya se mandó; así un reintento de la tarea no la repite).
+    """
+    alerta = repos.alerts.get(org_id, alerta_id)
+    if alerta is None or alerta.status != "pendiente":
+        return "omitida"
+    org = repos.organizations.get(org_id)
+    lote = repos.lots.get(org_id, alerta.lot_id)
+    if org is None or lote is None or not org.whatsapp_address:
+        logger.warning("alerta=%s sin número de WhatsApp de la organización: solo panel",
+                       alerta_id)
+        return "solo_panel"
+
+    plantilla = reglas.plantilla
+    enviada = False
+    for productor in repos.producers.list_by_farm(org_id, lote.farm_id,
+                                                  consent_status="aceptado"):
+        conv = repos.conversations.get_by_producer(org_id, productor.id)
+        try:
+            if dentro_de_ventana(conv.last_inbound_at if conv else None, ahora):
+                channel.send_text(org.whatsapp_address, productor.phone, alerta.message)
+            elif plantilla.nombre:
+                channel.send_template(org.whatsapp_address, productor.phone, plantilla.nombre,
+                                      plantilla.idioma, [alerta.message])
+            else:
+                logger.info("alerta=%s productor=%s fuera de la ventana de 24 h y sin "
+                            "plantilla: no se le manda", alerta_id, productor.id)
+                continue
+        except ChannelTemporaryError:
+            raise  # la tarea reintenta
+        except ChannelError as exc:
+            # Un número rechazado no impide avisarles a los demás.
+            logger.error("alerta=%s productor=%s el canal rechazó el envío: %s",
+                         alerta_id, productor.id, exc)
+            continue
+        enviada = True
+
+    if not enviada:
+        return "solo_panel"
+    repos.alerts.mark_sent(org_id, alerta_id)
+    return "enviada"

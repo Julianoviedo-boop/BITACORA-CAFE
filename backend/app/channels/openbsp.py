@@ -29,9 +29,18 @@ Archivos entrantes
 
 Salida
     POST {base}/rest/v1/messages con headers `apikey` y `api-key` (documentado).
+
+Plantillas (sin verificar con un envío real)
+    MIGRATING_FROM_TWILIO.md trae un ejemplo con `data.parameters` en la raíz, pero
+    los tipos del código (_shared/types/whatsapp_template_types.ts) piden
+    `language.policy: "deterministic"` y los parámetros dentro de
+    `components: [{type: "body", parameters}]`, como la API de Meta. Se usa la forma
+    de los tipos. Antes de configurar una plantilla en config/alertas.yaml hay que
+    probarla con un número real (docs/decisiones.md, D-017).
 """
 
 import logging
+from collections.abc import Sequence
 from typing import Any
 from urllib.parse import quote, urlsplit
 
@@ -183,12 +192,34 @@ class OpenBSPChannel(Channel):
         return parse_openbsp_payload(payload)
 
     def send_text(self, channel_address: str, to_phone: str, text: str) -> None:
+        self._insert_message(channel_address, to_phone,
+                             {"version": "1", "type": "text", "kind": "text", "text": text})
+
+    def send_template(
+        self, channel_address: str, to_phone: str, template: str, language: str,
+        params: Sequence[str],
+    ) -> None:
+        data: dict[str, Any] = {
+            "name": template,
+            "language": {"code": language, "policy": "deterministic"},
+        }
+        if params:
+            # Meta rechaza variables con saltos de línea, tabs o muchos espacios seguidos.
+            data["components"] = [{
+                "type": "body",
+                "parameters": [{"type": "text", "text": " ".join(p.split())} for p in params],
+            }]
+        self._insert_message(channel_address, to_phone,
+                             {"version": "1", "type": "data", "kind": "template", "data": data})
+
+    def _insert_message(self, channel_address: str, to_phone: str,
+                        content: dict[str, Any]) -> None:
         body = {
             "organization_id": self._organization_id,
             "organization_address": channel_address,
             "conversation_address": to_phone.removeprefix("+"),
             "service": "whatsapp",
-            "content": {"version": "1", "type": "text", "kind": "text", "text": text},
+            "content": content,
         }
         try:
             resp = self._client.post(

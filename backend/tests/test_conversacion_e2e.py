@@ -652,3 +652,42 @@ def test_si_otro_worker_cambia_la_conversacion_se_vuelve_a_empezar(mundo):
                                 mundo.org_id, msg_id) == "resumen"
     assert len(claude.llamadas) == 2  # se interpretó otra vez con el estado nuevo
     assert len(mundo.canal.sent) == 1 and "5 bultos" in mundo.canal.sent[0].text
+
+
+# ---------------------------------------------------------------------------
+# Alertas al confirmar
+# ---------------------------------------------------------------------------
+
+
+def test_confirmar_un_valor_fuera_de_rango_le_manda_la_alerta(mundo):
+    p, claude = mundo.productor, mundo.claude
+    claude.responde(evento("beneficio", lote="LOTE-003", mencion="el lote 3", fecha=hoy(),
+                           valores=(("etapa", "despulpado y fermentación", None),)))
+    p.escribe("Hoy despulpamos y pusimos a fermentar el lote 3")
+    assert p.escribe("Sí") == ["Listo ✅ Quedó guardado en la historia del lote."]
+    assert mundo.repos.alerts.list_open(mundo.org_id) == []
+
+    claude.responde(evento("medicion_fermentacion", lote="LOTE-003", mencion="el lote 3",
+                           fecha=hoy(), valores=(("temperatura", 45, "grado_celsius"),)))
+    p.escribe("El lote 3 está a 45 grados")
+    respuesta = p.escribe("Sí")
+
+    mundo.session.expire_all()
+    [alerta] = mundo.repos.alerts.list_open(mundo.org_id)
+    assert alerta.rule_code == "valor:fermentacion:temperatura"
+    assert "45" in alerta.message and "Lote 3" in alerta.message
+    # Primero la confirmación y después la alerta, en mensajes separados.
+    assert respuesta == ["Listo ✅ Quedó guardado en la historia del lote.", alerta.message]
+    assert alerta.status == "enviada"
+
+
+def test_un_error_del_motor_de_alertas_no_tumba_la_confirmacion(mundo, monkeypatch):
+    def falla(*a, **kw):
+        raise RuntimeError("bug en el motor")
+
+    monkeypatch.setattr(alertas, "al_confirmar", falla)
+    mundo.claude.responde(abonada())
+    mundo.productor.escribe("Hoy abonamos el lote 3 con 4 bultos de 17-6-18")
+    assert mundo.productor.escribe("Sí") == ["Listo ✅ Quedó guardado en la historia del lote."]
+    [ev] = _eventos(mundo)
+    assert ev.status == "confirmado"

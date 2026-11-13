@@ -5,10 +5,12 @@
 - download_media: lee archivos locales con referencias `fixture://<nombre>`,
   desde FAKE_MEDIA_DIR (por defecto backend/tests/fixtures).
 - send_text: no envía; guarda el mensaje en `sent` y lo escribe en el log.
+- send_template: igual, en `templates`.
 """
 
 import logging
 import mimetypes
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -33,10 +35,20 @@ class SentText:
     text: str
 
 
+@dataclass(frozen=True)
+class SentTemplate:
+    channel_address: str
+    to_phone: str
+    template: str
+    language: str
+    params: tuple[str, ...]
+
+
 class FakeChannel(Channel):
     def __init__(self, media_dir: Path) -> None:
         self.media_dir = media_dir
         self.sent: list[SentText] = []
+        self.templates: list[SentTemplate] = []
 
     def parse_incoming(self, payload: Any) -> IncomingMessage | None:
         return parse_openbsp_payload(payload)
@@ -53,3 +65,13 @@ class FakeChannel(Channel):
     def send_text(self, channel_address: str, to_phone: str, text: str) -> None:
         self.sent.append(SentText(channel_address, to_phone, text))
         logger.info("[canal falso] %s -> %s: %s", channel_address, to_phone, text)
+
+    def send_template(
+        self, channel_address: str, to_phone: str, template: str, language: str,
+        params: Sequence[str],
+    ) -> None:
+        self.templates.append(
+            SentTemplate(channel_address, to_phone, template, language, tuple(params))
+        )
+        logger.info("[canal falso] %s -> %s: plantilla %s (%s) %s", channel_address, to_phone,
+                    template, language, list(params))

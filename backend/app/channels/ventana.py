@@ -8,11 +8,12 @@ Hoy toda respuesta de la conversación contesta un mensaje recién llegado, así
 que casi siempre está dentro de la ventana. Puede quedar por fuera si el worker
 estuvo caído o si un mensaje se reintentó por mucho tiempo.
 
-PENDIENTE(tarea de alertas): las alertas sí salen fuera de la ventana y
-necesitan plantillas. Esa tarea debe:
-  1. agregar a `Channel` un `send_template(...)` (OpenBSP y canal falso), y
-  2. mandar con plantilla lo que quedó en `conversations.unsent_reply`
-     (respuestas que no se pudieron mandar por estar fuera de la ventana).
+Las alertas (app/domain/alertas.py) sí salen fuera de la ventana: usan
+`Channel.send_template` con la plantilla de config/alertas.yaml o, si no hay,
+quedan solo en el panel.
+
+PENDIENTE: mandar con plantilla lo que quedó en `conversations.unsent_reply`
+(respuestas de la conversación que no salieron por estar fuera de la ventana).
 """
 
 from datetime import datetime, timedelta

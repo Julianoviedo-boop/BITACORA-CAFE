@@ -1,5 +1,6 @@
 """Tareas de Celery."""
 
+import datetime as dt
 import logging
 import uuid
 from functools import lru_cache
@@ -9,7 +10,7 @@ from celery.signals import worker_process_init
 
 from app.channels import ChannelTemporaryError, get_channel
 from app.db.repositories import unit_of_work
-from app.domain import conversacion, transcripcion
+from app.domain import alertas, conversacion, transcripcion
 from app.domain.consentimiento import atender_mensaje, get_textos
 from app.extraction.llm import ClienteLLM
 from app.extraction.schema import catalogo_por_defecto
@@ -132,7 +133,8 @@ def atender_conversacion(self, organization_id: str, message_id: str) -> str:
     textos = conversacion.get_textos()
     try:
         return conversacion.atender(unit_of_work, get_channel(), _interprete(), textos,
-                                    org_id, msg_id)
+                                    org_id, msg_id,
+                                    despachar_alertas=_despachar_alertas(organization_id))
     except (ChannelTemporaryError, conversacion.ReintentarError) as exc:
         if self.request.retries < self.max_retries:
             espera = _espera_descarga(self.request.retries)
@@ -159,3 +161,28 @@ def avisar_productor(organization_id: str, message_id: str, texto: str) -> bool:
             repos, get_channel(), uuid.UUID(organization_id), uuid.UUID(message_id), texto
         )
 
+
+def _despachar_alertas(organization_id: str) -> conversacion.DespacharAlertas:
+    def despachar(alerta_ids: list[uuid.UUID]) -> None:
+        for alerta_id in alerta_ids:
+            enviar_alerta.delay(organization_id, str(alerta_id))
+    return despachar
+
+
+@celery_app.task(
+    name="enviar_alerta",
+    autoretry_for=(ChannelTemporaryError,),
+    retry_backoff=True,
+    retry_backoff_max=300,
+    max_retries=5,
+)
+def enviar_alerta(organization_id: str, alert_id: str) -> str:
+    """Manda una alerta nueva por WhatsApp (texto, plantilla o solo panel).
+
+    Si el canal falla de forma temporal, la transacción se deshace y se reintenta;
+    la alerta solo queda "enviada" cuando el envío salió.
+    """
+    with unit_of_work() as repos:
+        return alertas.enviar(repos, get_channel(), alertas.get_reglas(),
+                              uuid.UUID(organization_id), uuid.UUID(alert_id),
+                              dt.datetime.now(dt.UTC))
