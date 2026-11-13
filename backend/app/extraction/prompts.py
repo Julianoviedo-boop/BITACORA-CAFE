@@ -300,8 +300,7 @@ def _render_lote(lote: LoteContexto) -> str:
     return "- " + " | ".join(_neutralizar(p) for p in partes)
 
 
-def construir_mensaje(texto: str, recibido_en: dt.datetime,
-                      lotes: Sequence[LoteContexto]) -> str:
+def _contexto(recibido_en: dt.datetime, lotes: Sequence[LoteContexto]) -> list[str]:
     local = a_hora_colombia(recibido_en)
     lineas_lotes = [_render_lote(l) for l in lotes] or ["(esta organización no tiene lotes activos)"]
     contexto = "\n".join([
@@ -310,7 +309,54 @@ def construir_mensaje(texto: str, recibido_en: dt.datetime,
         "Lotes activos:",
         *lineas_lotes,
     ])
+    return ["<contexto>", contexto, "</contexto>"]
+
+
+def construir_mensaje(texto: str, recibido_en: dt.datetime,
+                      lotes: Sequence[LoteContexto]) -> str:
     return "\n".join([
-        "<contexto>", contexto, "</contexto>",
+        *_contexto(recibido_en, lotes),
         "<mensaje_productor>", _neutralizar(texto.strip()), "</mensaje_productor>",
     ])
+
+
+# Va en el mensaje del usuario y no en el system: así el system (cacheado y medido
+# con scripts/evaluar_extraccion.py) no cambia.
+_TAREA_REVISION = """\
+<tarea>
+Los eventos de <eventos_propuestos> salieron de mensajes anteriores del caficultor y \
+todavía NO están confirmados. Su mensaje nuevo responde la pregunta que se le hizo o \
+corrige esos eventos.
+Devuelva la lista COMPLETA de eventos ya corregida, en el mismo orden:
+- Cambie solo lo que el caficultor completa o corrige; el resto déjelo igual.
+- Si contesta la pregunta con pocas palabras ("4 bultos", "el lunes", "en el 2"), ese \
+dato es para el evento por el que se le preguntó.
+- Si dice que una labor no se hizo o que sobra, quítela. Si cuenta otra labor, \
+agréguela al final.
+- Siguen las mismas reglas: nunca invente datos, y lo que todavía falte va en \
+"faltantes".
+- Si el mensaje no completa ni corrige nada, devuelva los eventos tal como están.
+</tarea>"""
+
+
+def construir_mensaje_revision(
+    eventos: Sequence[dict], texto: str, recibido_en: dt.datetime,
+    lotes: Sequence[LoteContexto], pregunta: str | None = None,
+) -> str:
+    """Mensaje para completar o corregir eventos ya propuestos.
+
+    `eventos` va en el formato de la salida estructurada. Lo que salió del
+    productor (fragmentos, lote mencionado, valores) también se neutraliza.
+    """
+    partes = [
+        *_contexto(recibido_en, lotes),
+        "<eventos_propuestos>",
+        _neutralizar(json.dumps({"eventos": list(eventos)}, ensure_ascii=False)),
+        "</eventos_propuestos>",
+    ]
+    if pregunta:
+        partes += ["<pregunta_al_productor>", _neutralizar(pregunta.strip()),
+                   "</pregunta_al_productor>"]
+    partes += ["<mensaje_productor>", _neutralizar(texto.strip()), "</mensaje_productor>",
+               _TAREA_REVISION]
+    return "\n".join(partes)

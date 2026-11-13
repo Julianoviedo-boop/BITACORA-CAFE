@@ -1,5 +1,8 @@
 """Caso de uso: de un texto del productor a eventos propuestos (estado pendiente).
 
+`revisar` hace lo mismo cuando el productor responde una pregunta o corrige
+eventos ya propuestos: devuelve la lista completa corregida.
+
     lotes = lotes_activos(repos, organization_id)
     resultado = extraer(texto, recibido_en=mensaje.received_at, lotes=lotes)
 
@@ -158,13 +161,60 @@ def extraer(
     catalogo: CatalogoEventos | None = None,
 ) -> ResultadoExtraccion:
     """Extrae los eventos de un mensaje. `lotes` deben ser de la organización del mensaje."""
+    return _llamar(prompts.construir_mensaje(texto, recibido_en, lotes),
+                   recibido_en=recibido_en, lotes=lotes, cliente=cliente, catalogo=catalogo,
+                   etiqueta="extraccion")
+
+
+def revisar(
+    eventos: Sequence[EventoPropuesto],
+    texto: str,
+    *,
+    recibido_en: dt.datetime,
+    lotes: Sequence[LoteContexto],
+    pregunta: str | None = None,
+    cliente: ClienteLLM | None = None,
+    catalogo: CatalogoEventos | None = None,
+) -> ResultadoExtraccion:
+    """Aplica una respuesta o corrección del productor a eventos ya propuestos.
+
+    Devuelve la lista completa corregida, normalizada igual que en `extraer`.
+    `recibido_en` es la hora del mensaje NUEVO; las fechas ya propuestas van como
+    fechas exactas, así que no se corren si pasó un día.
+    """
+    mensaje = prompts.construir_mensaje_revision(
+        [a_salida(e) for e in eventos], texto, recibido_en, lotes, pregunta)
+    return _llamar(mensaje, recibido_en=recibido_en, lotes=lotes, cliente=cliente,
+                   catalogo=catalogo, etiqueta="revision")
+
+
+def a_salida(evento: EventoPropuesto) -> dict[str, Any]:
+    """Un evento ya normalizado, en el formato de la salida estructurada (para
+    devolvérselo a Claude cuando el productor lo completa o corrige)."""
+    return {
+        "tipo_evento": evento.tipo_evento,
+        "fragmento": evento.fragmento,
+        "lote_mencionado": evento.lote_mencionado,
+        "codigo_lote": evento.codigo_lote,
+        "fecha": evento.fecha.isoformat() if evento.fecha else None,
+        "hora": evento.hora.isoformat() if evento.hora else None,
+        "valores": [{"campo": c, "valor": d.valor, "unidad": d.unidad}
+                    for c, d in evento.datos.items() if d is not None],
+        "faltantes": list(evento.faltantes),
+    }
+
+
+def _llamar(mensaje: str, *, recibido_en: dt.datetime, lotes: Sequence[LoteContexto],
+            cliente: ClienteLLM | None, catalogo: CatalogoEventos | None,
+            etiqueta: str) -> ResultadoExtraccion:
     catalogo = catalogo or catalogo_por_defecto()
     modelos = construir_modelos(catalogo)
     cliente = cliente or ClienteLLM()
     salida, uso = cliente.parse(
         system=prompts.construir_system(catalogo),
-        mensaje=prompts.construir_mensaje(texto, recibido_en, lotes),
+        mensaje=mensaje,
         output_format=modelos.Extraccion,
+        etiqueta=etiqueta,
     )
     hoy = prompts.a_hora_colombia(recibido_en).date()
     return ResultadoExtraccion(eventos=normalizar(salida, catalogo, lotes, hoy),
