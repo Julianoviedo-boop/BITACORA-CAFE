@@ -9,6 +9,10 @@ Para no abrir una puerta trasera:
 - solo devuelve el id de la organización, nunca filas de negocio;
 - busca por igualdad exacta sobre una columna UNIQUE (un número = una organización);
 - todo lo que sigue después usa los repositorios con ese organization_id.
+
+`list_organization_ids` es la otra excepción: las tareas programadas (Celery beat,
+app/domain/alertas.py) recorren las organizaciones de a una. Solo devuelve ids, y
+cada organización se procesa después con sus repositorios.
 """
 
 import uuid
@@ -24,3 +28,7 @@ def find_organization_id_by_whatsapp_address(session: Session, address: str) -> 
         return None
     stmt = select(Organization.id).where(Organization.whatsapp_address == address)
     return session.scalars(stmt).one_or_none()
+
+
+def list_organization_ids(session: Session) -> list[uuid.UUID]:
+    return list(session.scalars(select(Organization.id).order_by(Organization.id)))

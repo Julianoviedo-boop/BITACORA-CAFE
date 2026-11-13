@@ -10,6 +10,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
 from app.db.models import (
+    ALERT_OPEN_STATUSES,
     CONSENT_STATUSES,
     PROCESSING_STATUSES,
     Alert,
@@ -109,6 +110,14 @@ class ProducerRepository(OrganizationScopedRepository[Producer]):
         producer.consent_at = _now()
         self.session.flush()
         return producer
+
+    def list_by_farm(
+        self, organization_id: uuid.UUID, farm_id: uuid.UUID, *, consent_status: str | None = None
+    ) -> Sequence[Producer]:
+        stmt = self._select(organization_id).where(Producer.farm_id == farm_id)
+        if consent_status is not None:
+            stmt = stmt.where(Producer.consent_status == consent_status)
+        return self.session.scalars(stmt.order_by(Producer.created_at, Producer.id)).all()
 
 
 class LotRepository(OrganizationScopedRepository[Lot]):
@@ -288,6 +297,69 @@ class AlertRepository(OrganizationScopedRepository[Alert]):
         alert.sent_at = _now()
         self.session.flush()
         return alert
+
+    def open_if_absent(
+        self,
+        organization_id: uuid.UUID,
+        /,
+        *,
+        lot_id: uuid.UUID,
+        rule_code: str,
+        message: str,
+        event_id: uuid.UUID | None = None,
+        due_at: datetime | None = None,
+    ) -> Alert | None:
+        """Abre la alerta si no hay otra abierta de la misma regla para el lote.
+
+        Devuelve la alerta nueva, o None si ya había una abierta. El índice único
+        parcial uq_alerts_open_rule lo garantiza aunque dos workers lo intenten a
+        la vez (ON CONFLICT DO NOTHING).
+        """
+        stmt = (
+            insert(Alert)
+            .values(organization_id=require_org(organization_id), lot_id=lot_id,
+                    rule_code=rule_code, message=message, event_id=event_id, due_at=due_at)
+            .on_conflict_do_nothing(
+                index_elements=[Alert.organization_id, Alert.lot_id, Alert.rule_code],
+                index_where=Alert.status.in_(ALERT_OPEN_STATUSES),
+            )
+            .returning(Alert.id)
+        )
+        new_id = self.session.execute(stmt).scalar_one_or_none()
+        return self.get(organization_id, new_id) if new_id is not None else None
+
+    def list_open(
+        self, organization_id: uuid.UUID, *, lot_id: uuid.UUID | None = None
+    ) -> Sequence[Alert]:
+        stmt = self._select(organization_id).where(Alert.status.in_(ALERT_OPEN_STATUSES))
+        if lot_id is not None:
+            stmt = stmt.where(Alert.lot_id == lot_id)
+        return self.session.scalars(stmt.order_by(Alert.created_at, Alert.id)).all()
+
+    def resolve_open(
+        self,
+        organization_id: uuid.UUID,
+        lot_id: uuid.UUID,
+        rule_code: str,
+        *,
+        due_until: datetime | None = None,
+    ) -> int:
+        """Cierra ("resuelta") la alerta abierta de la regla en el lote.
+
+        Con due_until, solo si la alerta vale desde antes de esa hora: una medición
+        vieja que llega tarde no cierra una alerta más reciente. Devuelve cuántas cerró.
+        """
+        stmt = (
+            update(Alert)
+            .where(Alert.organization_id == require_org(organization_id),
+                   Alert.lot_id == lot_id, Alert.rule_code == rule_code,
+                   Alert.status.in_(ALERT_OPEN_STATUSES))
+            .values(status="resuelta", resolved_at=_now(), updated_at=func.now())
+            .execution_options(synchronize_session="fetch")
+        )
+        if due_until is not None:
+            stmt = stmt.where(Alert.due_at <= due_until)
+        return self.session.execute(stmt).rowcount
 
 
 class ReportRepository(OrganizationScopedRepository[Report]):

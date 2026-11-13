@@ -207,6 +207,63 @@ def test_alerta_enviada(repos, org, lot):
     assert repos.alerts.list_pending(org) == []
 
 
+def test_alerta_abierta_no_se_repite(repos, org, lot):
+    primera = repos.alerts.open_if_absent(org, lot_id=lot.id, rule_code="valor:secado:humedad",
+                                          message="Humedad alta", due_at=NOW)
+    assert primera is not None and primera.status == "pendiente"
+    # Abierta (pendiente o enviada): la misma regla no vuelve a abrir otra.
+    assert repos.alerts.open_if_absent(org, lot_id=lot.id, rule_code="valor:secado:humedad",
+                                       message="Otra vez") is None
+    repos.alerts.mark_sent(org, primera.id)
+    assert repos.alerts.open_if_absent(org, lot_id=lot.id, rule_code="valor:secado:humedad",
+                                       message="Otra vez") is None
+    # Otra regla del mismo lote sí.
+    assert repos.alerts.open_if_absent(org, lot_id=lot.id, rule_code="tiempo:secado:x",
+                                       message="x") is not None
+    assert len(repos.alerts.list_open(org, lot_id=lot.id)) == 2
+
+
+def test_indice_impide_dos_alertas_abiertas_iguales(repos, org, lot, db_session):
+    repos.alerts.add(org, lot_id=lot.id, rule_code="r", message="uno")
+    with pytest.raises(IntegrityError), db_session.begin_nested():
+        repos.alerts.add(org, lot_id=lot.id, rule_code="r", message="dos")
+
+
+def test_alerta_resuelta_puede_volver_a_abrirse(repos, org, lot):
+    alerta = repos.alerts.open_if_absent(org, lot_id=lot.id, rule_code="r", message="uno")
+    assert repos.alerts.resolve_open(org, lot.id, "r") == 1
+    assert repos.alerts.get(org, alerta.id).status == "resuelta"
+    assert repos.alerts.get(org, alerta.id).resolved_at is not None
+    assert repos.alerts.list_open(org) == []
+    assert repos.alerts.resolve_open(org, lot.id, "r") == 0
+    assert repos.alerts.open_if_absent(org, lot_id=lot.id, rule_code="r", message="dos") is not None
+
+
+def test_resolver_solo_alertas_anteriores(repos, org, lot):
+    repos.alerts.open_if_absent(org, lot_id=lot.id, rule_code="r", message="x", due_at=NOW)
+    # Una medición de antes de la alerta (llegó tarde) no la cierra.
+    antes = NOW.replace(hour=6)
+    assert repos.alerts.resolve_open(org, lot.id, "r", due_until=antes) == 0
+    assert repos.alerts.resolve_open(org, lot.id, "r", due_until=NOW) == 1
+
+
+def test_productores_de_una_finca(repos, org, lot):
+    otra_finca = repos.farms.add(org, name="Otra")
+    ana = repos.producers.add(org, full_name="Ana", phone="+573001111111", farm_id=lot.farm_id)
+    luis = repos.producers.add(org, full_name="Luis", phone="+573002222222", farm_id=lot.farm_id)
+    repos.producers.add(org, full_name="Eva", phone="+573003333333", farm_id=otra_finca.id)
+    repos.producers.record_consent(org, luis.id, "aceptado")
+    assert [p.id for p in repos.producers.list_by_farm(org, lot.farm_id)] == [ana.id, luis.id]
+    assert [p.id for p in repos.producers.list_by_farm(
+        org, lot.farm_id, consent_status="aceptado")] == [luis.id]
+
+
+def test_ids_de_organizaciones_para_tareas_programadas(db_session, org):
+    from app.db.repositories.routing import list_organization_ids
+
+    assert org in list_organization_ids(db_session)
+
+
 def test_reporte_rango_de_fechas_valido(repos, org, lot, db_session):
     from datetime import date
 

@@ -45,7 +45,13 @@ PROCESSING_STATUSES = (
     "recibido", "transcrito", "extraido", "procesado", "sin_consentimiento", "error"
 )
 EVENT_STATUSES = ("pendiente", "confirmado", "rechazado")
-ALERT_STATUSES = ("pendiente", "enviada", "descartada")
+# Alertas (app/domain/alertas.py):
+#   pendiente  -> abierta, todavía no se le mandó al productor (solo en el panel).
+#   enviada    -> abierta y ya se le mandó.
+#   resuelta   -> se cerró sola (llegó el evento que faltaba, el valor volvió al rango...).
+#   descartada -> la cerró alguien desde el panel.
+ALERT_STATUSES = ("pendiente", "enviada", "resuelta", "descartada")
+ALERT_OPEN_STATUSES = ("pendiente", "enviada")
 REPORT_STATUSES = ("pendiente", "generado", "error")
 # Conversación con un productor (app/domain/conversacion.py):
 #   libre           -> no hay nada pendiente.
@@ -198,16 +204,24 @@ class Alert(UUIDPrimaryKey, Timestamps, OrganizationScoped, Base):
         _same_org_fk("lot_id", "lots"),
         _same_org_fk("event_id", "lot_events"),
         CheckConstraint(_in("status", ALERT_STATUSES), name="status"),
+        # Una alerta no se repite mientras siga abierta: lo garantiza la base, aunque
+        # dos workers revisen el mismo lote a la vez.
+        Index("uq_alerts_open_rule", "organization_id", "lot_id", "rule_code", unique=True,
+              postgresql_where=text(_in("status", ALERT_OPEN_STATUSES))),
     )
 
     lot_id: Mapped[uuid.UUID]
+    # Evento que la disparó (alertas por valor).
     event_id: Mapped[uuid.UUID | None]
-    # Código de la regla en config/alertas.yaml.
+    # Código de la regla en config/alertas.yaml (p. ej. "valor:secado:humedad").
     rule_code: Mapped[str] = mapped_column(String(80))
     message: Mapped[str] = mapped_column(Text)
+    # Desde cuándo vale la alerta: la hora del evento (por valor) o la hora en que
+    # se venció el plazo (por tiempo).
     due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     status: Mapped[str] = mapped_column(String(20), default="pendiente", server_default="pendiente")
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class Report(UUIDPrimaryKey, Timestamps, OrganizationScoped, Base):

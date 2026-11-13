@@ -161,6 +161,9 @@ ATTACKS: list[Attack] = [
     Attack("producers", "get_by_phone", "teléfono de B", lambda w: _a(w.b.phone)),
     Attack("producers", "record_consent", "productor de B",
            lambda w: _a(w.b.producer_id, "revocado")),
+    Attack("producers", "list_by_farm", "finca de B", lambda w: _a(w.b.farm_id)),
+    Attack("producers", "list_by_farm", "finca de B con consentimiento",
+           lambda w: _a(w.b.farm_id, consent_status="pendiente")),
     # lots
     *_generic("lots", "lot_id", {"name": "Hackeado"}),
     Attack("lots", "update", "mover lote de A a finca de B",
@@ -203,6 +206,17 @@ ATTACKS: list[Attack] = [
            "integridad"),
     Attack("alerts", "list_pending", "pendientes de A", lambda w: _a()),
     Attack("alerts", "mark_sent", "alerta de B", lambda w: _a(w.b.alert_id)),
+    Attack("alerts", "open_if_absent", "en lote de B",
+           lambda w: _a(lot_id=w.b.lot_id, rule_code="x", message="x"), "integridad"),
+    Attack("alerts", "open_if_absent", "con evento de B",
+           lambda w: _a(lot_id=w.a.lot_id, event_id=w.b.event_id, rule_code="x", message="x"),
+           "integridad"),
+    # B tiene abierta la misma regla en un lote con el mismo código: A sí puede abrirla.
+    Attack("alerts", "open_if_absent", "regla abierta en B",
+           lambda w: _a(lot_id=w.a.lot_id, rule_code="otra", message="x")),
+    Attack("alerts", "list_open", "abiertas de A", lambda w: _a()),
+    Attack("alerts", "list_open", "lote de B", lambda w: _a(lot_id=w.b.lot_id)),
+    Attack("alerts", "resolve_open", "alerta de B", lambda w: _a(w.b.lot_id, "carencia")),
     # reports
     *_generic("reports", "report_id", {"file_ref": "hack.pdf"}),
     Attack("reports", "add", "en lote de B",
@@ -373,6 +387,8 @@ def test_a_si_ve_lo_suyo(world: World, repos: Repositories) -> None:
     assert repos.messages.get_by_external_id(a.org_id, a.external_id).id == a.message_id
     assert [e.id for e in repos.events.list_by_lot(a.org_id, a.lot_id)] == [a.event_id]
     assert [x.id for x in repos.alerts.list_pending(a.org_id)] == [a.alert_id]
+    assert [x.id for x in repos.alerts.list_open(a.org_id, lot_id=a.lot_id)] == [a.alert_id]
+    assert [p.id for p in repos.producers.list_by_farm(a.org_id, a.farm_id)] == [a.producer_id]
     assert [r.id for r in repos.reports.list_by_lot(a.org_id, a.lot_id)] == [a.report_id]
     assert repos.conversations.get_by_producer(a.org_id, a.producer_id).id == a.conversation_id
     assert repos.conversations.get_or_create(a.org_id, a.producer_id).id == a.conversation_id
