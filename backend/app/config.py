@@ -41,6 +41,15 @@ class Settings(BaseSettings):
     # Canal falso: carpeta de donde se leen los audios/imágenes "fixture://<nombre>".
     fake_media_dir: str = "tests/fixtures"
 
+    # --- Transcripción (faster-whisper) ---
+    whisper_model: str = "small"
+    whisper_device: str = "cpu"
+    whisper_compute_type: str = "int8"
+    whisper_language: str = "es"
+    # Hilos por proceso del worker; 0 = lo que decida CTranslate2. Con varios procesos
+    # (--concurrency) conviene que hilos x procesos no pase de los núcleos.
+    whisper_cpu_threads: int = 0
+
 
 @lru_cache
 def get_settings() -> Settings:

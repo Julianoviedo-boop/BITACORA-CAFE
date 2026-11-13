@@ -1,0 +1,48 @@
+# Términos cafeteros que ayudan a la transcripción.
+# Un término por línea. Las líneas que empiezan con # y las vacías se ignoran.
+# Whisper solo usa unas 200 palabras de pista: ponga primero lo que más se dice.
+# Nombres de lotes, fincas e insumos propios de la organización también sirven.
+
+café
+lote
+finca
+cafetal
+abonada
+fumigada
+fumigación
+desyerba
+plateo
+guadaña
+recolección
+graneo
+traviesa
+cereza
+pergamino
+pasilla
+beneficio
+despulpar
+fermentar
+lavar
+secar
+marquesina
+broca
+roya
+mancha de hierro
+gotera
+Castillo
+Caturra
+Colombia
+Cenicafé 1
+Tabi
+Borbón
+geisha
+arroba
+bulto
+kilos
+jornal
+recolectores
+17-6-18
+25-4-24
+DAP
+urea
+cal dolomita

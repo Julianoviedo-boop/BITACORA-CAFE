@@ -28,4 +28,5 @@ testpaths = ["tests"]
 pythonpath = ["."]
 markers = [
     "db: requiere PostgreSQL (se salta si no hay base; con REQUIRE_DB_TESTS=1 falla)",
+    "whisper: transcribe con el modelo real (lento; solo con RUN_WHISPER_TESTS=1)",
 ]

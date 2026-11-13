@@ -1,0 +1,21 @@
+# Transcripción de audios de WhatsApp.
+#
+# max_duracion_segundos: los audios más largos no se transcriben; se le pide al
+# productor que los mande más cortos. 3 minutos en CPU tardan del orden de un
+# minuto con el modelo small.
+#
+# avisos: lo que se le dice al productor cuando su audio no se pudo transcribir.
+# {minutos} se reemplaza por el máximo en minutos (p. ej. "3").
+
+max_duracion_segundos: 180
+
+avisos:
+  audio_muy_largo: |
+    Su audio quedó un poquito largo 🙏 Para entenderle bien, mándelo en audios de máximo {minutos} minutos.
+    Puede partirlo en dos o tres, uno por cada labor.
+  audio_no_disponible: |
+    No pudimos abrir su audio 😕 ¿Nos lo vuelve a mandar, por favor?
+  audio_sin_voz: |
+    No le escuchamos nada en el audio. ¿Nos lo vuelve a mandar hablando cerquita del celular?
+  error_transcripcion: |
+    Tuvimos un problema con su audio 😕 ¿Nos lo vuelve a mandar, por favor? Si prefiere, también lo puede escribir.
