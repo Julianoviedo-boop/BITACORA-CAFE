@@ -1,61 +1,172 @@
-# Diferencias para producción. Se usa encima del archivo base:
-#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
-# - Imágenes finales (sin recarga, sin código montado desde el host).
-# - adminer, flower y dozzle sin puertos publicados.
-# - restart: unless-stopped en todos los servicios.
+# Producción en un VPS. Archivo independiente (no se combina con docker-compose.yml).
+# Ver docs/despliegue.md.
+#
+# - Las imágenes vienen de GHCR (las construye GitHub Actions al hacer push a main);
+#   en el servidor no se compila nada. La versión la fija IMAGE_TAG en el .env.
+# - Caddy es el ÚNICO servicio con puertos públicos (80 y 443) y saca los
+#   certificados HTTPS solo.
+# - adminer, flower y dozzle quedan en 127.0.0.1 del servidor: se entra por túnel SSH.
+# - Para no escribir -f en cada comando, el .env del servidor trae
+#   COMPOSE_FILE=docker-compose.prod.yml (docker compose lo lee de ahí).
+
+name: bitacora-cafe
+
+x-backend: &backend
+  image: ${REGISTRO:-ghcr.io}/${GHCR_OWNER:?falta GHCR_OWNER en el .env}/bitacora-cafe-backend:${IMAGE_TAG:?falta IMAGE_TAG en el .env}
+  env_file: .env
+  environment:
+    CONFIG_DIR: /config
+    HF_HOME: /home/app/.cache/huggingface
+  volumes:
+    - ./config:/config:ro
+    - hf_cache:/home/app/.cache/huggingface
+  restart: unless-stopped
+  logging: &logging
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "5"
 
 services:
+  caddy:
+    image: caddy:2.10-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp" # HTTP/3
+    environment:
+      API_DOMAIN: ${API_DOMAIN:?falta API_DOMAIN en el .env}
+      WEB_DOMAIN: ${WEB_DOMAIN:?falta WEB_DOMAIN en el .env}
+      ACME_EMAIL: ${ACME_EMAIL:?falta ACME_EMAIL en el .env}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data # certificados: si se borra, Caddy los pide otra vez
+      - caddy_config:/config
+    depends_on:
+      api:
+        condition: service_healthy
+      web:
+        condition: service_started
+    logging: *logging
+
   api:
-    build:
-      target: api
-    command: !reset null
+    <<: *backend
+    # El CMD de la imagen aplica las migraciones pendientes y arranca uvicorn.
     environment:
       CONFIG_DIR: /config
       HF_HOME: /home/app/.cache/huggingface
-      WATCHFILES_FORCE_POLLING: !reset null
-    volumes: !override
-      - ./config:/config:ro
-      - hf_cache:/home/app/.cache/huggingface
-    restart: unless-stopped
+      # uvicorn --proxy-headers solo confía en 127.0.0.1 por defecto; la api no es
+      # alcanzable desde fuera de la red de Docker, así que se confía en Caddy.
+      FORWARDED_ALLOW_IPS: "*"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=4).status == 200 else 1)"
+      interval: 15s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
 
   worker:
-    volumes: !override
-      - ./config:/config:ro
-      - hf_cache:/home/app/.cache/huggingface
-    restart: unless-stopped
+    <<: *backend
+    command: celery -A app.worker.celery_app:celery_app worker --loglevel=INFO --concurrency=2
+    depends_on:
+      api:
+        condition: service_healthy
 
+  # Debe haber UNO solo (ver D-017).
   beat:
-    volumes: !override
+    <<: *backend
+    command: >-
+      celery -A app.worker.celery_app:celery_app beat --loglevel=INFO
+      --schedule /tmp/celerybeat-schedule
+    volumes:
       - ./config:/config:ro
-    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
 
   web:
-    build:
-      target: prod
-    environment:
-      WATCHPACK_POLLING: !reset null
-    volumes: !reset []
+    image: ${REGISTRO:-ghcr.io}/${GHCR_OWNER}/bitacora-cafe-web:${IMAGE_TAG}
     restart: unless-stopped
+    environment:
+      API_INTERNAL_URL: http://api:8000
+    depends_on:
+      api:
+        condition: service_healthy
+    logging: *logging
 
   db:
-    ports: !reset []
+    image: postgres:17-alpine
     restart: unless-stopped
+    env_file: .env
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    logging: *logging
 
   redis:
-    ports: !reset []
+    image: redis:7.4-alpine
     restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    logging: *logging
 
+  # --- Herramientas internas: solo en 127.0.0.1 del servidor (túnel SSH) ---
   adminer:
-    ports: !reset []
+    image: adminer:5
     restart: unless-stopped
+    environment:
+      ADMINER_DEFAULT_SERVER: db
+    ports:
+      - "127.0.0.1:8081:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+    logging: *logging
 
   flower:
-    ports: !reset []
+    image: mher/flower:2.0
     restart: unless-stopped
+    env_file: .env
+    command: celery flower --port=5555
+    ports:
+      - "127.0.0.1:5555:5555"
+    depends_on:
+      redis:
+        condition: service_healthy
+    logging: *logging
 
   dozzle:
-    ports: !reset []
+    image: amir20/dozzle:latest
     restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    ports:
+      - "127.0.0.1:8888:8080"
+    logging: *logging
 
-  tunnel:
-    restart: unless-stopped
+volumes:
+  pg_data:
+  redis_data:
+  hf_cache:
+  caddy_data:
+  caddy_config:

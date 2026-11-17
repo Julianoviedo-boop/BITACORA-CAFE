@@ -1,0 +1,31 @@
+# Proxy inverso con HTTPS automático (Let's Encrypt). Los dominios salen del .env.
+# Antes del primer arranque, los registros DNS (A/AAAA) de los dos dominios deben
+# apuntar a la IP del servidor; si no, Caddy no puede sacar los certificados.
+
+{
+	email {$ACME_EMAIL}
+}
+
+(seguridad) {
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+	encode zstd gzip
+}
+
+# API: aquí llega el webhook de OpenBSP (/webhooks/openbsp/<secreto>).
+# Sin log de accesos a propósito: la URL del webhook lleva el secreto.
+{$API_DOMAIN} {
+	import seguridad
+	reverse_proxy api:8000
+}
+
+# Panel web.
+{$WEB_DOMAIN} {
+	import seguridad
+	header X-Frame-Options "DENY"
+	reverse_proxy web:3000
+}

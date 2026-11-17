@@ -36,3 +36,6 @@ data/
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# Historial de versiones desplegadas (solo en el servidor)
+deploy/historial.log
