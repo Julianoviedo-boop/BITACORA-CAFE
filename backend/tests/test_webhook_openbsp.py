@@ -215,6 +215,55 @@ def test_con_bearer_correcto_pasa(client, settings):
 
 
 # ---------------------------------------------------------------------------
+# Producción: se exigen las dos credenciales (URL + token del header)
+# ---------------------------------------------------------------------------
+
+TOKEN_LARGO = "t" * 40
+
+
+@pytest.mark.parametrize("token", ["", "corto"], ids=["sin_token", "token_corto"])
+def test_en_produccion_sin_token_rechaza_aunque_la_url_sea_correcta(client, settings, token):
+    # Quien solo conozca la URL no puede hacerse pasar por un productor.
+    settings.app_env = "production"
+    settings.openbsp_webhook_token = token
+    assert _post(client, _payload(sender=None)).status_code == 401
+
+
+def test_en_produccion_con_las_dos_credenciales_pasa(client, settings):
+    settings.app_env = "production"
+    settings.openbsp_webhook_token = TOKEN_LARGO
+    headers = {"Authorization": f"Bearer {TOKEN_LARGO}"}
+    assert _post(client, _payload(sender=None), headers=headers).status_code == 200
+    assert _post(client, _payload(sender=None)).status_code == 401  # sin el header
+
+
+def test_en_desarrollo_el_token_sigue_siendo_opcional(client, settings):
+    settings.app_env = "development"
+    settings.openbsp_webhook_token = ""
+    assert _post(client, _payload(sender=None)).status_code == 200
+
+
+@pytest.mark.parametrize(
+    "env,token,falla",
+    [("production", "", True), ("PRODUCTION", "corto", True), ("production", TOKEN_LARGO, False),
+     ("development", "", False)],
+)
+def test_validar_al_arrancar(env, token, falla):
+    s = Settings(app_env=env, openbsp_webhook_secret=SECRETO, openbsp_webhook_token=token)
+    if falla:
+        with pytest.raises(RuntimeError, match="OPENBSP_WEBHOOK_TOKEN"):
+            webhooks.validar_al_arrancar(s)
+    else:
+        webhooks.validar_al_arrancar(s)
+
+
+def test_validar_al_arrancar_en_produccion_sin_secreto():
+    s = Settings(app_env="production", openbsp_webhook_secret="", openbsp_webhook_token=TOKEN_LARGO)
+    with pytest.raises(RuntimeError, match="OPENBSP_WEBHOOK_SECRET"):
+        webhooks.validar_al_arrancar(s)
+
+
+# ---------------------------------------------------------------------------
 # Con base de datos
 # ---------------------------------------------------------------------------
 

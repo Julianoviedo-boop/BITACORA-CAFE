@@ -1,92 +1,174 @@
 # Bitácora de Café
 
-El caficultor manda audios o textos por WhatsApp sobre lo que hizo en un lote; el sistema transcribe, extrae los datos, pide confirmación y arma la historia del lote. Ver [CLAUDE.md](CLAUDE.md) y [docs/](docs/).
+[![CI](https://github.com/Julianoviedo-boop/BITACORA-CAFE/actions/workflows/ci.yml/badge.svg)](https://github.com/Julianoviedo-boop/BITACORA-CAFE/actions/workflows/ci.yml)
+[![Publicar imágenes](https://github.com/Julianoviedo-boop/BITACORA-CAFE/actions/workflows/publicar.yml/badge.svg)](https://github.com/Julianoviedo-boop/BITACORA-CAFE/actions/workflows/publicar.yml)
 
-## Requisitos
+**El caficultor le cuenta a WhatsApp lo que hizo en su lote, con un audio o un texto. El sistema lo transcribe, saca los datos, se los confirma y arma la historia del lote para la trazabilidad.**
 
-- Docker Desktop (o Docker Engine) con Docker Compose v2.20 o superior.
+> *"Hoy abonamos el lote La Esperanza con 4 bultos de 17-6-18"*
+>
+> → **Lote La Esperanza: abonada, hoy, 17-6-18, 4 bultos. ¿Está bien? Responde SÍ o dime qué cambiar.**
 
-## Arrancar en local
+## El problema
 
-```bash
-cp .env.example .env        # y cambie las contraseñas
-docker compose up -d --build
-docker compose ps           # api, db y redis deben quedar "healthy"
+En una finca cafetera se abona, se fumiga, se recolecta, se fermenta y se seca, pero casi nada queda anotado. Sin ese registro no hay trazabilidad para certificaciones ni para compradores de cafés especiales, y es difícil saber qué funcionó en cada lote.
+
+Las apps de registro fallan en campo por lo mismo: piden formularios, buena señal y tiempo. El caficultor ya usa WhatsApp todos los días y prefiere hablar que escribir. Bitácora de Café no le pide nada nuevo: manda una nota de voz como se la mandaría al asesor, y el sistema hace el resto.
+
+## Cómo funciona
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor P as Caficultor
+    participant W as WhatsApp (OpenBSP)
+    participant A as API (FastAPI)
+    participant Q as Redis + Celery
+    participant T as faster-whisper
+    participant C as Claude
+    participant D as PostgreSQL
+
+    P->>W: Audio: "hoy abonamos el lote 3..."
+    W->>A: Webhook
+    A->>D: Guarda el mensaje (idempotente por id externo)
+    A->>Q: Encola la tarea
+    A-->>W: 200 OK al instante
+    Q->>T: Transcribe el audio (CPU, con vocabulario cafetero)
+    Q->>C: Extrae eventos con salida estructurada (Pydantic)
+    Q->>D: Evento PENDIENTE
+    Q->>W: "Lote 3: abonada, 4 bultos de 17-6-18. ¿Está bien?"
+    W->>P: Resumen
+    P->>W: SÍ
+    W->>A: Webhook
+    A->>Q: Encola
+    Q->>D: Evento CONFIRMADO → historia del lote
+    Q->>Q: Revisa alertas (temperatura, humedad, plazos)
 ```
 
-El primer build tarda varios minutos (faster-whisper y sus dependencias). El modelo de Whisper se guarda en el volumen `hf_cache`, así que solo se descarga una vez y sobrevive a los rebuilds.
+Lo que hace que funcione en el mundo real:
 
-## Servicios
+- **Nada se guarda sin un SÍ explícito.** Un evento nace *pendiente* y solo pasa a *confirmado* con la respuesta del caficultor. Si falta un dato, se pregunta (una sola pregunta a la vez); si corrige ("no, fueron 5 bultos"), se actualiza el pendiente.
+- **Webhook rápido e idempotente.** Responde en milisegundos y deja lo pesado a Celery; si WhatsApp reintenta, el mensaje no se procesa dos veces.
+- **Multi-organización desde la base.** Cada consulta exige `organization_id`; las claves foráneas compuestas impiden mezclar datos entre asociaciones, y hay pruebas que lo verifican.
+- **Reglas del café en YAML, no en el código.** Los tipos de evento, las etapas, las alertas y los límites viven en [`config/`](config/) y se validan al arrancar: un agrónomo puede ajustarlos sin programar.
+- **Alertas por valor y por tiempo.** "La fermentación pasó de 24 °C" o "12 horas fermentando sin volteo", respetando la ventana de 24 horas de WhatsApp.
+- **Protección de datos y de costos.** Autorización de tratamiento de datos antes de procesar nada, topes de mensajes por productor y por organización, y límite de duración de audios.
 
-Todos los puertos quedan ligados a `127.0.0.1` (no se exponen a la red).
+Las decisiones de diseño, con su contexto y consecuencias, están en [docs/decisiones.md](docs/decisiones.md).
+
+## Stack
+
+| Capa | Tecnología |
+|---|---|
+| API y webhook | FastAPI, Pydantic |
+| Base de datos | PostgreSQL 17, SQLAlchemy 2, Alembic |
+| Tareas en segundo plano | Celery + Redis (y Celery beat para las alertas por tiempo) |
+| Transcripción | faster-whisper, modelo `small` en CPU (int8) |
+| Extracción | API de Claude con salida estructurada |
+| Canal | WhatsApp vía OpenBSP |
+| Panel | Next.js + Tailwind |
+| Infraestructura | Docker Compose, Caddy (HTTPS automático), GitHub Actions, GHCR |
+
+## Arquitectura en producción
+
+```mermaid
+flowchart LR
+    I((Internet)) -->|443| CA[Caddy<br/>HTTPS automático]
+    CA --> API[api<br/>FastAPI]
+    CA --> WEB[web<br/>Next.js]
+    API --> R[(Redis)]
+    API --> DB[(PostgreSQL)]
+    R --> WK[worker<br/>Celery + Whisper]
+    BT[beat] --> R
+    WK --> DB
+    WK -->|Claude| X[API de Anthropic]
+    WK -->|WhatsApp| O[OpenBSP]
+    DB -.->|pg_dump diario, cifrado| S3[(Almacenamiento<br/>externo)]
+    subgraph SSH[Solo por túnel SSH]
+        AD[Adminer]
+        FL[Flower]
+        DZ[Dozzle]
+    end
+```
+
+- Solo los puertos 80 y 443 están abiertos. Adminer, Flower y Dozzle escuchan en `127.0.0.1` del servidor.
+- En cada pull request: pruebas del backend contra PostgreSQL real, prueba de respaldo y restauración, build del panel y de las imágenes.
+- En cada push a `main`: las imágenes se publican en GHCR con el tag `sha-<commit>`. El servidor despliega un tag concreto y puede volver al anterior con un comando.
+
+Guía completa: [docs/despliegue.md](docs/despliegue.md).
+
+## Correrlo en local
+
+Requisito: Docker con Docker Compose 2.20 o superior.
+
+```bash
+cp .env.example .env        # cambie las contraseñas
+docker compose up -d --build
+docker compose ps           # api, db y redis deben quedar "healthy"
+docker compose exec api python /scripts/seed.py      # datos de ejemplo (2 organizaciones)
+```
+
+El primer build tarda varios minutos (faster-whisper). El modelo de Whisper se guarda en el volumen `hf_cache` y solo se descarga una vez.
+
+Sin WhatsApp ni llave de Claude se puede probar con el canal falso (`WHATSAPP_CHANNEL=fake`, el valor por defecto) y el simulador:
+
+```bash
+docker compose exec api python /scripts/simular_mensaje.py --help
+```
+
+### Servicios en local
+
+Todos los puertos quedan en `127.0.0.1`.
 
 | Servicio | URL | Para qué |
 |---|---|---|
 | api | http://localhost:8000 · [docs](http://localhost:8000/docs) | FastAPI con recarga automática |
-| web | http://localhost:3000 | Panel en Next.js |
-| worker | — | Celery (misma imagen base que la api, etapa `worker`) |
-| beat | — | Celery beat: revisa las alertas por tiempo cada 30 min (uno solo) |
-| db | localhost:5432 | PostgreSQL (volumen `pg_data`) |
-| redis | localhost:6379 | Broker y resultados de Celery |
-| adminer | http://localhost:8081 | Ver la base de datos (servidor: `db`) |
-| flower | http://localhost:5555 | Monitorear tareas de Celery |
-| dozzle | http://localhost:8888 | Ver los logs de todos los contenedores |
-| tunnel | — | Túnel de Cloudflare hacia `api:8000` (perfil `tunnel`) |
+| web | http://localhost:3000 | Panel |
+| adminer | http://localhost:8081 | Ver la base (servidor: `db`) |
+| flower | http://localhost:5555 | Tareas de Celery |
+| dozzle | http://localhost:8888 | Logs de todos los contenedores |
+| tunnel | — | Túnel de Cloudflare hacia la api para probar el webhook real (`--profile tunnel`) |
 
-## Comprobar que todo funciona
+### Pruebas
 
 ```bash
-# Salud: revisa base de datos, migraciones y Redis (200 si todo bien, 503 si algo falla)
-curl http://localhost:8000/health
-# {"status":"ok","checks":{"db":"ok","migraciones":"ok","redis":"ok"}}
-
-# Encolar la tarea "ping" y esperar la respuesta del worker
-docker compose exec api python -c "from app.worker.tasks import ping; print(ping.delay().get(timeout=10))"
-# pong
-
-# Pruebas del backend (usan la base bitacora_cafe_test, que se crea sola)
-docker compose exec -e REQUIRE_DB_TESTS=1 api pytest
+docker compose exec -e REQUIRE_DB_TESTS=1 api pytest     # ~860 pruebas, con PostgreSQL real
+curl http://localhost:8000/health                         # {"status":"ok","checks":{...}}
 ```
 
-## Base de datos
-
-La api aplica las migraciones pendientes cada vez que arranca, y `/health` responde 503 si la base no está en la última migración. El worker espera a que la api esté healthy.
+### Comandos útiles
 
 ```bash
-docker compose exec api alembic upgrade head          # aplicar migraciones a mano
-docker compose exec api python /scripts/seed.py       # datos de ejemplo (2 organizaciones)
+docker compose logs -f api worker
 docker compose exec api alembic revision --autogenerate -m "describa el cambio"
-docker compose exec api alembic check                 # ¿los modelos y las migraciones coinciden?
-```
-
-Los endpoints y las tareas no consultan la base directamente: usan los repositorios de `app/db/repositories/`, y todos sus métodos exigen `organization_id`.
-
-## Comandos útiles
-
-```bash
-docker compose logs -f api worker          # logs
-docker compose up -d --scale worker=3      # más workers
-docker compose --profile tunnel up -d      # abrir el túnel público
-docker compose logs tunnel | grep trycloudflare   # ver la URL del túnel
-docker compose down                        # apagar (los datos quedan en los volúmenes)
-docker compose down -v                     # apagar y BORRAR datos y caché de modelos
-```
-
-El túnel usa un "quick tunnel" de Cloudflare: la URL `*.trycloudflare.com` cambia cada vez que arranca. Para una URL fija, cree un túnel con nombre en Cloudflare y cambie el comando por `tunnel --no-autoupdate run --token ...` con el token en el `.env`.
-
-## Producción
-
-`docker-compose.prod.yml` solo trae las diferencias: imágenes finales sin recarga ni código montado, adminer/flower/dozzle sin puertos publicados y `restart: unless-stopped`.
-
-```bash
-docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+docker compose exec api alembic check                     # ¿modelos y migraciones coinciden?
+docker compose --profile tunnel up -d && docker compose logs tunnel | grep trycloudflare
+docker compose down                                       # apagar (los datos quedan)
+docker compose down -v                                    # apagar y BORRAR datos
 ```
 
 ## Estructura
 
 ```
-backend/   FastAPI, Celery, SQLAlchemy (Dockerfile multietapa: dev, api, worker)
-web/       Panel en Next.js + Tailwind (Dockerfile: dev y prod standalone)
-config/    Reglas de negocio en YAML (se montan en /config, solo lectura)
-docs/      Especificación y decisiones
+backend/
+  app/
+    api/            Endpoints y webhook
+    channels/       Único lugar que habla con WhatsApp
+    db/             Modelos y repositorios (todos exigen organization_id)
+    domain/         Conversación, consentimiento, alertas, límites
+    transcription/  faster-whisper
+    extraction/     Claude con salida estructurada
+    worker/         Tareas de Celery
+  alembic/          Migraciones
+  tests/            Pruebas y audios de ejemplo
+web/                Panel en Next.js
+config/             Reglas de negocio en YAML
+deploy/             Caddyfile y respaldo diario (systemd)
+scripts/            Desplegar, volver atrás, respaldar, restaurar, simular mensajes
+docs/               Especificación, decisiones y despliegue
+.github/workflows/  CI y publicación de imágenes
 ```
+
+## Estado
+
+Primera versión en construcción. Funcionan el flujo completo por WhatsApp (audio o texto → transcripción → extracción → preguntas → confirmación), las alertas y el despliegue. Faltan el reporte de trazabilidad por lote y las vistas del panel (historia del lote, alertas, eventos pendientes para el asesor). Ver [docs/especificacion.md](docs/especificacion.md).

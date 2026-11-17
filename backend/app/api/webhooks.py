@@ -44,15 +44,44 @@ def _iguales(a: str, b: str) -> bool:
     return hmac.compare_digest(a.encode(), b.encode())
 
 
-def autenticado(secreto_url: str, authorization: str | None, settings: Settings) -> bool:
-    esperado = settings.openbsp_webhook_secret
-    if len(esperado) < MIN_SECRET_LENGTH:
-        logger.error(
-            "OPENBSP_WEBHOOK_SECRET vacío o con menos de %d caracteres: "
-            "se rechazan todos los webhooks", MIN_SECRET_LENGTH,
+def es_produccion(settings: Settings) -> bool:
+    return settings.app_env.strip().lower() == "production"
+
+
+def problemas_de_credenciales(settings: Settings) -> list[str]:
+    """Qué le falta a la configuración del webhook. Vacío = todo bien.
+
+    En producción se exigen las DOS credenciales: el secreto de la URL y el token
+    del header. La URL queda escrita en la configuración de OpenBSP, en logs de
+    proxies y en capturas de pantalla; si solo se pidiera eso, quien la viera
+    podría hacerse pasar por cualquier productor y confirmar sus eventos
+    (regla de oro 2). El token viaja aparte, en el header Authorization.
+    """
+    problemas = []
+    if len(settings.openbsp_webhook_secret) < MIN_SECRET_LENGTH:
+        problemas.append(f"OPENBSP_WEBHOOK_SECRET vacío o con menos de {MIN_SECRET_LENGTH} caracteres")
+    if es_produccion(settings) and len(settings.openbsp_webhook_token) < MIN_SECRET_LENGTH:
+        problemas.append(
+            f"OPENBSP_WEBHOOK_TOKEN vacío o con menos de {MIN_SECRET_LENGTH} caracteres "
+            "(obligatorio con APP_ENV=production)"
         )
+    return problemas
+
+
+def validar_al_arrancar(settings: Settings | None = None) -> None:
+    """En producción la API no arranca si al webhook le falta una credencial."""
+    settings = settings or get_settings()
+    problemas = problemas_de_credenciales(settings)
+    if problemas and es_produccion(settings):
+        raise RuntimeError("Webhook mal configurado: " + "; ".join(problemas))
+
+
+def autenticado(secreto_url: str, authorization: str | None, settings: Settings) -> bool:
+    problemas = problemas_de_credenciales(settings)
+    if problemas:
+        logger.error("Se rechazan todos los webhooks: %s", "; ".join(problemas))
         return False
-    ok = _iguales(secreto_url, esperado)
+    ok = _iguales(secreto_url, settings.openbsp_webhook_secret)
     if settings.openbsp_webhook_token:
         auth = authorization or ""
         recibido = auth[len("Bearer "):] if auth.startswith("Bearer ") else ""

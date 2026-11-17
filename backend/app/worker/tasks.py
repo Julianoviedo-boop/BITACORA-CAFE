@@ -11,7 +11,7 @@ from celery.signals import beat_init, worker_init, worker_process_init
 from app.channels import ChannelTemporaryError, get_channel
 from app.db.repositories import unit_of_work
 from app.db.repositories.routing import list_organization_ids
-from app.domain import alertas, conversacion, transcripcion
+from app.domain import alertas, conversacion, limites, transcripcion
 from app.domain.consentimiento import atender_mensaje, get_textos
 from app.extraction.llm import ClienteLLM
 from app.extraction.schema import catalogo_por_defecto
@@ -51,6 +51,7 @@ def validar_configuracion(**_: object) -> None:
     """
     try:
         alertas.validar_al_arrancar()
+        limites.get_reglas()  # config/limites.yaml
     except Exception as exc:  # noqa: BLE001
         logger.critical("No se puede arrancar: %s", exc)
         raise SystemExit(1) from exc
@@ -74,11 +75,18 @@ def procesar_mensaje(organization_id: str, message_id: str) -> str:
 
     El envío por WhatsApp ocurre dentro de la transacción: si falla, no queda
     ningún cambio en la base y la tarea se reintenta desde cero.
+
+    Después del consentimiento se revisan los límites de uso (config/limites.yaml),
+    antes de gastar CPU transcribiendo o plata llamando a Claude.
     """
+    org_id, msg_id = uuid.UUID(organization_id), uuid.UUID(message_id)
     with unit_of_work() as repos:
-        resultado = atender_mensaje(
-            repos, get_channel(), uuid.UUID(organization_id), uuid.UUID(message_id), get_textos()
-        )
+        resultado = atender_mensaje(repos, get_channel(), org_id, msg_id, get_textos())
+        if resultado in ("listo_para_transcribir", "listo_para_procesar"):
+            resultado = limites.atender(
+                repos, get_channel(), _contador(), limites.get_reglas(), org_id, msg_id,
+                dt.datetime.now(dt.UTC),
+            ) or resultado
     # Se encola después del commit, para que la otra tarea vea el mensaje.
     if resultado == "listo_para_transcribir":
         transcribir_audio.delay(organization_id, message_id)
@@ -127,9 +135,16 @@ def transcribir_audio(self, organization_id: str, message_id: str) -> str:
 
 
 @lru_cache
+def _contador() -> limites.ContadorRedis:
+    # Uno por proceso: reutiliza la conexión con Redis.
+    return limites.ContadorRedis.desde_settings()
+
+
+@lru_cache
 def _cliente_llm() -> ClienteLLM:
     # Uno por proceso: reutiliza las conexiones HTTP con la API de Claude.
-    return ClienteLLM()
+    # El techo de tokens por respuesta sale de config/limites.yaml.
+    return ClienteLLM(max_tokens=limites.get_reglas().max_tokens_respuesta)
 
 
 def _interprete() -> conversacion.Interprete:

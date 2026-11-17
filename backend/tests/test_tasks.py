@@ -45,6 +45,49 @@ def test_procesar_mensaje_llama_al_dominio_con_uuids(monkeypatch):
     assert llamadas == [("repos", "canal", org, msg, "textos")]
 
 
+def _procesar_con_limites(monkeypatch, consentimiento, resultado_limites):
+    import uuid
+    from contextlib import contextmanager
+
+    from app.worker import tasks
+
+    @contextmanager
+    def uow():
+        yield "repos"
+
+    revisados, encolados = [], []
+    monkeypatch.setattr(tasks, "unit_of_work", uow)
+    monkeypatch.setattr(tasks, "get_channel", lambda: "canal")
+    monkeypatch.setattr(tasks, "get_textos", lambda: "textos")
+    monkeypatch.setattr(tasks, "_contador", lambda: "contador")
+    monkeypatch.setattr(tasks.limites, "get_reglas", lambda: "reglas")
+    monkeypatch.setattr(tasks, "atender_mensaje", lambda *a: consentimiento)
+    monkeypatch.setattr(tasks.limites, "atender",
+                        lambda *a: revisados.append(a[:6]) or resultado_limites)
+    monkeypatch.setattr(tasks.transcribir_audio, "delay", lambda *a: encolados.append("audio"))
+    monkeypatch.setattr(tasks.atender_conversacion, "delay", lambda *a: encolados.append("texto"))
+    org, msg = uuid.uuid4(), uuid.uuid4()
+    return tasks.procesar_mensaje(str(org), str(msg)), revisados, encolados, (org, msg)
+
+
+def test_procesar_mensaje_revisa_limites_antes_de_transcribir(monkeypatch):
+    resultado, revisados, encolados, (org, msg) = _procesar_con_limites(
+        monkeypatch, "listo_para_transcribir", None)
+    assert resultado == "listo_para_transcribir" and encolados == ["audio"]
+    assert revisados == [("repos", "canal", "contador", "reglas", org, msg)]
+
+
+def test_procesar_mensaje_sobre_el_limite_no_encola_nada(monkeypatch):
+    resultado, _, encolados, _ = _procesar_con_limites(
+        monkeypatch, "listo_para_procesar", "limite_excedido")
+    assert resultado == "limite_excedido" and encolados == []
+
+
+def test_procesar_mensaje_sin_consentimiento_no_cuenta_limites(monkeypatch):
+    _, revisados, _, _ = _procesar_con_limites(monkeypatch, "consentimiento_solicitado", None)
+    assert revisados == []
+
+
 # ---------------------------------------------------------------------------
 # atender_conversacion
 # ---------------------------------------------------------------------------

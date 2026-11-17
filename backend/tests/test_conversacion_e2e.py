@@ -35,6 +35,7 @@ from app.extraction.schema import cargar_catalogo
 from app.transcription.whisper import Transcripcion
 from app.worker import tasks
 from app.worker.celery_app import celery_app
+from tests.test_limites import ContadorMemoria
 
 pytestmark = pytest.mark.db
 
@@ -191,6 +192,10 @@ def mundo(db_session, repos, monkeypatch, textos, catalogo, sim):
     monkeypatch.setattr(tasks, "get_channel", lambda: canal)
     monkeypatch.setattr(tasks, "get_textos", lambda: cargar_textos_consentimiento(config_dir))
     monkeypatch.setattr(tasks, "_transcriptor", transcriptor)
+    # Límites de uso con las reglas reales de config/limites.yaml, pero contados
+    # en memoria: las pruebas no deben escribir en el Redis de desarrollo.
+    contador = ContadorMemoria()
+    monkeypatch.setattr(tasks, "_contador", lambda: contador)
     monkeypatch.setattr(tasks, "_interprete", lambda: conversacion.Interprete(
         catalogo=catalogo, cliente=ClienteLLM(client=claude, dormir=lambda s: None)))
     monkeypatch.setattr(transcripcion, "get_reglas",

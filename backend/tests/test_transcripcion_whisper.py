@@ -162,7 +162,25 @@ def test_rechaza_audio_largo_sin_transcribir():
     with pytest.raises(AudioDemasiadoLargoError) as exc:
         transcribir(AUDIO, max_duracion_s=5, modelo=modelo)
     assert modelo.llamadas == []
-    assert exc.value.maximo_s == 5 and exc.value.duracion_s > 10
+    # Se detiene apenas pasa del máximo: no decodifica los 10 s completos.
+    assert exc.value.maximo_s == 5 and 5 < exc.value.duracion_s < 7
+
+
+def test_decodificar_se_detiene_apenas_pasa_el_maximo():
+    # El audio dura 10,34 s. Con máximo de 1 s debe parar cerca de 1 s, no leer
+    # todo: así un audio de horas en pocos MB no llena la memoria del worker.
+    with pytest.raises(AudioDemasiadoLargoError) as exc:
+        decodificar(AUDIO, max_duracion_s=1)
+    assert 1 < exc.value.duracion_s < 2
+
+
+def test_decodificar_sin_maximo_lee_todo():
+    assert len(decodificar(AUDIO, max_duracion_s=None)) / whisper.SAMPLE_RATE > 10
+
+
+def test_audio_justo_en_el_maximo_pasa():
+    audio = decodificar(AUDIO, max_duracion_s=11)
+    assert 10 < len(audio) / whisper.SAMPLE_RATE < 11
 
 
 def test_audio_sin_voz_da_texto_vacio():

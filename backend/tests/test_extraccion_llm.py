@@ -112,3 +112,29 @@ def test_clasificacion_de_errores():
     assert es_temporal(anthropic.APITimeoutError(request=_REQ))
     assert not es_temporal(_status(anthropic.AuthenticationError, 401))
     assert not es_temporal(ValueError())
+
+
+# ---------------------------------------------------------------------------
+# Techo de tokens por respuesta (config/limites.yaml -> max_tokens_respuesta)
+# ---------------------------------------------------------------------------
+
+
+def test_max_tokens_por_defecto_del_cliente():
+    fake = FakeClient(_respuesta())
+    c, _ = _cliente(fake, max_tokens=8000)
+    c.parse(system="reglas", mensaje="hola", output_format=Salida)
+    assert fake.llamadas[0]["max_tokens"] == 8000
+
+
+def test_max_tokens_de_la_llamada_manda_sobre_el_del_cliente():
+    fake = FakeClient(_respuesta())
+    c, _ = _cliente(fake, max_tokens=8000)
+    c.parse(system="reglas", mensaje="hola", output_format=Salida, max_tokens=500)
+    assert fake.llamadas[0]["max_tokens"] == 500
+
+
+def test_sin_configurar_sigue_en_16000():
+    fake = FakeClient(_respuesta())
+    c, _ = _cliente(fake)
+    c.parse(system="reglas", mensaje="hola", output_format=Salida)
+    assert fake.llamadas[0]["max_tokens"] == 16000

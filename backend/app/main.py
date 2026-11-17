@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from app.api.health import router as health_router
+from app.api import webhooks
 from app.api.webhooks import OcultarSecretoWebhook
 from app.api.webhooks import router as webhooks_router
 from app.config import get_settings
@@ -22,6 +23,8 @@ if get_settings().app_env == "production" and get_settings().whatsapp_channel ==
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     # Si config/alertas.yaml tiene errores, la API no arranca y el log dice cuáles.
     alertas.validar_al_arrancar()
+    # En producción, sin las dos credenciales del webhook la API no arranca.
+    webhooks.validar_al_arrancar()
     yield
 
 
