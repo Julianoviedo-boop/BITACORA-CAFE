@@ -194,3 +194,19 @@ Formato: cada decisión tiene fecha, contexto, decisión y consecuencias. Las nu
   - Sigue pendiente mandar con plantilla las respuestas de la conversación que quedaron en `conversations.unsent_reply` (D-016, punto 10).
   - Debe correr **un solo** beat. Si hubiera dos, cada revisión correría dos veces (no repite alertas, pero trabaja doble).
 
+
+## D-018 · Seguridad: token del webhook obligatorio en producción, límites de uso y audio largo
+- **Fecha:** 2026-11-16
+- **Contexto:** Una auditoría de seguridad encontró tres riesgos medios: (1) OpenBSP no firma sus webhooks y el token del header era opcional, así que quien viera la URL del webhook podía hacerse pasar por cualquier productor y confirmar sus eventos (regla de oro 2); (2) un teléfono registrado podía mandar miles de mensajes sin tope y disparar el gasto de la API de Claude u ocupar la cola de todas las organizaciones; (3) el audio se decodificaba completo antes de revisar su duración, y un archivo de 20 MB en Opus puede durar horas y llenar la memoria del worker.
+- **Decisión:**
+  1. **Webhook:** con `APP_ENV=production` se exigen las dos credenciales, `OPENBSP_WEBHOOK_SECRET` (URL) y `OPENBSP_WEBHOOK_TOKEN` (header `Authorization: Bearer`), ambas de al menos 32 caracteres. Sin ellas la API no arranca, y si cambiaran en caliente se rechazan todos los avisos. En desarrollo el token sigue siendo opcional.
+  2. **Límites de uso** (`config/limites.yaml`, `app/domain/limites.py`): topes por productor (30/hora, 150/día) y por organización (300/hora, 2.000/día), en horas y días de Colombia. Se revisan en `procesar_mensaje`, después del consentimiento y antes de transcribir o llamar a Claude; el webhook no cambia. Se cuentan en Redis con un conjunto de ids de mensaje (un reintento no cuenta doble). Primero se cuenta al productor y solo si está dentro de su tope se cuenta para la organización, para que uno que se pasa no les gaste el cupo a los demás. Al pasarse, el mensaje queda en `error` (`limite_productor_hora`...) y se le avisa una sola vez por ventana. Si Redis no responde, se deja pasar y queda en el log.
+  3. **Texto máximo:** `max_caracteres_texto` (4.000). Más largo, no va a Claude: queda en `error` (`texto_muy_largo`) y se le pide mandarlo por partes.
+  4. **Techo de tokens por respuesta de Claude:** `max_tokens_respuesta` (8.000, antes 16.000 fijo en el código).
+  5. **Audio:** `decodificar` cuenta muestras mientras decodifica y se detiene apenas pasa `max_duracion_segundos`. No se confía en la duración que declara el archivo.
+- **Consecuencias:**
+  - **Antes de desplegar:** generar `OPENBSP_WEBHOOK_TOKEN` con `python -c "import secrets; print(secrets.token_urlsafe(48))"`, ponerlo en el `.env` del servidor y en el campo `token` del webhook en OpenBSP.
+  - Los topes son una primera estimación (un reporte normal usa de 2 a 6 mensajes). Ajustarlos con el uso real; el log dice cuándo alguien los alcanza.
+  - Si con 8.000 tokens una respuesta se corta, el log dice "La respuesta quedó cortada (max_tokens)": subir el valor.
+  - Sigue siendo recomendable poner un límite de gasto mensual en la consola de Anthropic.
+  - Todas las organizaciones siguen compartiendo una sola cola de Celery; los topes reducen el problema pero no lo eliminan.

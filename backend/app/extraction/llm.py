@@ -88,10 +88,13 @@ class ClienteLLM:
         espera_max_s: float = 30.0,
         timeout_s: float = 60.0,
         dormir: Callable[[float], None] = time.sleep,
+        max_tokens: int = 16000,
     ) -> None:
         settings = get_settings()
         self.modelo = modelo or settings.anthropic_model
         self.effort = effort or settings.anthropic_effort
+        # Techo de cada respuesta (incluye lo que piensa); pone límite al costo.
+        self.max_tokens = max_tokens
         self.max_intentos = max(1, max_intentos)
         self.espera_base_s = espera_base_s
         self.espera_max_s = espera_max_s
@@ -112,9 +115,10 @@ class ClienteLLM:
         system: str,
         mensaje: str,
         output_format: type[T],
-        max_tokens: int = 16000,
+        max_tokens: int | None = None,
         etiqueta: str = "extraccion",
     ) -> tuple[T, UsoTokens]:
+        max_tokens = max_tokens or self.max_tokens
         inicio = time.monotonic()
         for intento in range(1, self.max_intentos + 1):
             try:

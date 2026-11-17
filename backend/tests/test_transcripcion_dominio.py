@@ -367,6 +367,10 @@ def test_procesar_mensaje_encola_la_transcripcion_solo_para_audios(monkeypatch):
     monkeypatch.setattr(tasks.transcribir_audio, "delay", lambda *a: encolados.append(a))
     monkeypatch.setattr(tasks.atender_conversacion, "delay",
                         lambda *a: conversaciones.append(a))
+    # Dentro de los límites de uso (se prueban en test_limites.py y test_tasks.py).
+    monkeypatch.setattr(tasks, "_contador", lambda: "contador")
+    monkeypatch.setattr(tasks.limites, "get_reglas", lambda: "reglas")
+    monkeypatch.setattr(tasks.limites, "atender", lambda *a: None)
     org, msg = str(uuid.uuid4()), str(uuid.uuid4())
 
     # Texto: directo a la conversación, sin transcribir.

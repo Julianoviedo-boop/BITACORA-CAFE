@@ -1,0 +1,46 @@
+# Límites de uso (app/domain/limites.py).
+#
+# Cada mensaje atendido gasta CPU (transcripción) y plata (API de Claude). Estos
+# topes evitan que un teléfono registrado, por error o a propósito, mande miles
+# de mensajes y dispare el gasto o deje la cola ocupada para los demás.
+#
+# Se revisan después del consentimiento y ANTES de transcribir o llamar a Claude.
+# Cuentan todos los mensajes de un productor que ya aceptó: reportes, respuestas
+# a preguntas y el "sí" de confirmar. Un reporte normal usa de 2 a 6 mensajes.
+#
+# Las horas y los días son de Colombia (la hora en punto y la medianoche).
+# Si un productor pasa su tope, sus mensajes no se procesan hasta la siguiente
+# hora o el día siguiente, y se le avisa UNA vez por hora o por día.
+# Lo que mande otro productor de la misma organización no se ve afectado,
+# salvo que la organización entera llegue a su tope.
+
+por_productor:
+  por_hora: 30
+  por_dia: 150
+
+por_organizacion:
+  por_hora: 300
+  por_dia: 2000
+
+# Textos más largos no se mandan a Claude. WhatsApp no deja escribir más de
+# 4096 caracteres en un mensaje, así que con esto solo se frenan los que no
+# llegan por WhatsApp normal. Un audio de 3 minutos son unos 2.500 caracteres.
+max_caracteres_texto: 4000
+
+# Máximo de tokens que puede responder Claude en cada llamada (incluye lo que
+# piensa antes de responder). Pone techo al costo de una sola llamada. Un
+# resumen de la semana con varios eventos usa muy por debajo de esto; si se
+# queda corto, el log dice "La respuesta quedó cortada (max_tokens)".
+max_tokens_respuesta: 8000
+
+# {max_caracteres} lo llena el sistema.
+avisos:
+  limite_hora: |
+    Nos ha mandado muchos mensajes en esta hora 🙏 Por ahora no los podemos anotar.
+    Espere un ratico y nos vuelve a escribir.
+  limite_dia: |
+    Por hoy ya recibimos muchos mensajes suyos 🙏 Lo que mande desde ahora no queda anotado.
+    Mañana seguimos con mucho gusto.
+  texto_muy_largo: |
+    Su mensaje quedó muy largo 🙏 Mándelo en mensajes más cortos, de máximo {max_caracteres} letras.
+    Puede mandar uno por cada labor.

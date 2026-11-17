@@ -144,8 +144,14 @@ def modelo_desde_settings() -> WhisperModel:
 # ---------------------------------------------------------------------------
 
 
-def decodificar(path: str | Path) -> np.ndarray:
+def decodificar(path: str | Path, max_duracion_s: float | None = None) -> np.ndarray:
     """Audio mono float32 a 16 kHz. Lanza AudioInvalidoError si no se puede leer.
+
+    Con `max_duracion_s`, deja de decodificar apenas el audio pasa de esa
+    duración y lanza AudioDemasiadoLargoError. Así un archivo de pocos MB que
+    dura horas (Opus comprime mucho) no llena la memoria del worker: nunca se
+    guardan en memoria más muestras que las del máximo. No se confía en la
+    duración que dice el archivo (se puede falsificar): se cuentan las muestras.
 
     No se usa faster_whisper.decode_audio: en faster-whisper 1.2.1 llama a
     av.open(metadata_errors=...), que PyAV 16+ ya no acepta (TypeError con
@@ -154,7 +160,19 @@ def decodificar(path: str | Path) -> np.ndarray:
     """
     import av
 
+    max_muestras = None if max_duracion_s is None else int(max_duracion_s * SAMPLE_RATE)
     trozos: list[np.ndarray] = []
+    total = 0
+
+    def agregar(frames_salida: Iterable[Any]) -> None:
+        nonlocal total
+        for f in frames_salida:
+            trozo = f.to_ndarray().reshape(-1)
+            trozos.append(trozo)
+            total += len(trozo)
+        if max_muestras is not None and total > max_muestras:
+            raise AudioDemasiadoLargoError(total / SAMPLE_RATE, max_duracion_s or 0)
+
     try:
         with av.open(str(path), mode="r") as contenedor:
             if not contenedor.streams.audio:
@@ -168,8 +186,8 @@ def decodificar(path: str | Path) -> np.ndarray:
                     break
                 except av.error.InvalidDataError:
                     continue
-                trozos.extend(f.to_ndarray().reshape(-1) for f in resampler.resample(frame))
-            trozos.extend(f.to_ndarray().reshape(-1) for f in resampler.resample(None))
+                agregar(resampler.resample(frame))
+            agregar(resampler.resample(None))
     except av.error.FFmpegError as exc:
         raise AudioInvalidoError(f"No se pudo decodificar el audio: {exc}") from exc
     if not trozos:
@@ -197,18 +215,16 @@ def transcribir(
     """Transcribe un archivo de audio.
 
     Lanza AudioInvalidoError si no se puede decodificar y AudioDemasiadoLargoError
-    si dura más de max_duracion_s (antes de gastar CPU transcribiendo).
+    si dura más de max_duracion_s: eso se nota mientras se decodifica, antes de
+    gastar memoria y CPU en el resto del audio.
     `modelo`, `prompt` y `language` por defecto salen de la configuración.
     """
     tiempos: dict[str, float] = {}
 
     t0 = time.perf_counter()
-    audio = decodificar(path)
+    audio = decodificar(path, max_duracion_s=max_duracion_s)
     duracion = len(audio) / SAMPLE_RATE
     tiempos["decodificar"] = round(time.perf_counter() - t0, 3)
-
-    if duracion > max_duracion_s:
-        raise AudioDemasiadoLargoError(duracion, max_duracion_s)
 
     modelo = modelo if modelo is not None else modelo_desde_settings()
     t0 = time.perf_counter()
