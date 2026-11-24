@@ -161,7 +161,9 @@ def test_datos_publicos_quitan_lo_privado(catalogo, textos):
         "dato_viejo": "ya no está en el catálogo",
     })
     publicos = historia._datos(ev, catalogo, textos, solo_publicos=True)
-    assert [(d.etiqueta, d.valor) for d in publicos] == [("Abono", "17-6-18")]
+    # Cantidad es obligatoria: si falta, se dice; nunca se estima.
+    assert [(d.etiqueta, d.valor) for d in publicos] == [
+        ("Abono", "17-6-18"), ("Cantidad", "No registrado")]
 
 
 def test_nombre_de_la_etapa(reglas):
@@ -338,7 +340,8 @@ def test_historia_publica_solo_lo_que_puede_ver_un_comprador(repos, catalogo, te
     assert h.lote.nombre == "La Esperanza"
     assert (h.lote.municipio, h.lote.departamento, h.lote.altitud_m) == ("Pitalito", "Huila", 1650)
     assert [e.tipo for e in h.eventos] == ["abonada", "medicion_humedad"]
-    assert [(d.etiqueta, d.valor) for d in h.eventos[0].datos] == [("Abono", "17-6-18")]
+    assert [(d.etiqueta, d.valor) for d in h.eventos[0].datos] == [
+        ("Abono", "17-6-18"), ("Cantidad", "No registrado")]
     assert [s.campo for s in h.mediciones] == ["humedad"]
     # Nada de texto original, teléfonos ni nombres de personas.
     plano = repr(h)

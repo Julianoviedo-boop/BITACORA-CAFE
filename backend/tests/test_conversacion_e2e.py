@@ -754,3 +754,65 @@ def test_un_error_del_motor_de_alertas_no_tumba_la_confirmacion(mundo, monkeypat
     assert mundo.productor.escribe("Sí") == ["Listo ✅ Quedó guardado en la historia del lote."]
     [ev] = _eventos(mundo)
     assert ev.status == "confirmado"
+
+
+# ---------------------------------------------------------------------------
+# Reporte en PDF por WhatsApp (D-023)
+# ---------------------------------------------------------------------------
+
+
+def test_reporte_lote_manda_el_pdf_como_documento(mundo):
+    pytest.importorskip("weasyprint")
+    p, claude = mundo.productor, mundo.claude
+    claude.responde(abonada())
+    p.escribe("Hoy abonamos el lote 3 con 4 bultos de 17-6-18")
+    p.escribe("sí")
+    llamadas = len(claude.llamadas)
+
+    assert p.escribe("Reporte lote 3 por favor") == [
+        "Ya te mando el reporte de Lote 3 (LOTE-003) en PDF 📄 Se lo puedes reenviar a tu "
+        "comprador."]
+    [doc] = mundo.canal.documents
+    assert doc.to_phone == TELEFONO
+    assert doc.filename == "reporte-LOTE-003.pdf"
+    assert doc.content.startswith(b"%PDF")
+    assert doc.caption == "Reporte de trazabilidad de Lote 3 (LOTE-003)."
+    # Es un comando: ni Claude ni eventos nuevos.
+    assert len(claude.llamadas) == llamadas
+    assert _conversacion(mundo).state == "libre"
+
+
+def test_reporte_sin_registros_o_sin_lote_no_manda_nada(mundo):
+    p = mundo.productor
+    assert p.escribe("reporte lote 3") == [
+        "Lote 3 todavía no tiene registros confirmados. Cuando los tenga te mando el reporte."]
+    assert p.escribe("reporte") == ["¿De qué lote quieres el reporte? Por ejemplo: REPORTE LOTE 3."]
+    assert p.escribe("reporte lote 9") == [
+        "No encontré el lote «9». Escribe MIS LOTES para ver tus lotes."]
+    assert mundo.canal.documents == []
+    assert mundo.claude.llamadas == []
+
+
+def test_reporte_largo_es_un_registro(mundo):
+    p, claude = mundo.productor, mundo.claude
+    claude.responde(abonada())
+    [respuesta] = p.escribe("Reporte de hoy: abonamos el lote 3 con 4 bultos de 17-6-18")
+    assert respuesta.endswith(CONFIRMAR)
+    assert len(claude.llamadas) == 1
+    assert mundo.canal.documents == []
+
+
+def test_si_el_pdf_falla_se_le_avisa(mundo, monkeypatch):
+    from app.reports import whatsapp as reporte_whatsapp
+
+    p, claude = mundo.productor, mundo.claude
+    claude.responde(abonada())
+    p.escribe("Hoy abonamos el lote 3 con 4 bultos de 17-6-18")
+    p.escribe("sí")
+
+    def falla(*a, **kw):
+        raise RuntimeError("WeasyPrint se cayó")
+
+    monkeypatch.setattr(reporte_whatsapp, "generar_pdf", falla)
+    assert p.escribe("reporte lote 3")[-1] == mundo.textos.t("reporte_error")
+    assert mundo.canal.documents == []

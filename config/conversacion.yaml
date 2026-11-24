@@ -73,6 +73,18 @@ comandos:
     - "resumen lote"
     - "resumen de"
     - "resumen"
+  # Prefijos del reporte en PDF: "reporte lote 3", "reporte La Esperanza". Se le
+  # manda el reporte de trazabilidad del lote como documento (D-023). Igual que con
+  # RESUMEN, si después viene un texto largo es un registro ("reporte de hoy: ...").
+  reporte:
+    - "reporte del lote"
+    - "reporte lote"
+    - "reporte de"
+    - "reporte"
+    - "informe del lote"
+    - "informe lote"
+    - "pdf del lote"
+    - "pdf lote"
   # Preguntas por un lote: lo que sigue es el lote ("¿cómo va el lote 3?", "¿cómo
   # va La Esperanza?"). Responden igual que RESUMEN. Solo cuentan si lo que sigue
   # dice "lote", trae un número o es el nombre de un lote, y si es corto; si no
@@ -173,6 +185,7 @@ textos:
     También puedes escribir:
     • MIS LOTES: ver tus lotes
     • RESUMEN LOTE 3 o ¿CÓMO VA EL LOTE 3?: ver lo último que se hizo en un lote
+    • REPORTE LOTE 3: recibir el reporte del lote en PDF para un comprador
     • CANCELAR: borrar lo que esté pendiente
   mis_lotes: |
     Tus lotes:
@@ -186,3 +199,9 @@ textos:
   resumen_vacio: "{lote} todavía no tiene registros confirmados."
   resumen_sin_lote: "¿De qué lote quieres el resumen? Por ejemplo: RESUMEN LOTE 3."
   lote_no_encontrado: "No encontré el lote «{lote}». Escribe MIS LOTES para ver tus lotes."
+  # Reporte en PDF. {lote}: "La Esperanza (MIR-01)".
+  reporte_enviando: "Ya te mando el reporte de {lote} en PDF 📄 Se lo puedes reenviar a tu comprador."
+  reporte_vacio: "{lote} todavía no tiene registros confirmados. Cuando los tenga te mando el reporte."
+  reporte_sin_lote: "¿De qué lote quieres el reporte? Por ejemplo: REPORTE LOTE 3."
+  reporte_listo: "Reporte de trazabilidad de {lote}."
+  reporte_error: "No pude armar el reporte en este momento 😕 Escribe otra vez REPORTE en un rato."

@@ -1,4 +1,4 @@
-import { ArrowLeft, ChartLine, History, MapPin, TriangleAlert } from "lucide-react";
+import { ArrowLeft, ChartLine, FileDown, History, MapPin, TriangleAlert } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
@@ -9,6 +9,7 @@ import { GraficaMediciones } from "@/components/bitacora/grafica-mediciones";
 import { LineaTiempo } from "@/components/bitacora/linea-tiempo";
 import { ListaAlertas } from "@/components/bitacora/lista-alertas";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { historiaLote } from "@/lib/api";
 
 export const dynamic = "force-dynamic";
@@ -71,8 +72,19 @@ export default async function DetalleLote({ params }: Props) {
           return (
             <>
               <header className="mt-4">
-                <p className="font-mono text-sm font-medium tracking-wide text-terracota">{lote.codigo}</p>
-                <h1 className="text-3xl font-semibold sm:text-4xl">{lote.nombre}</h1>
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <p className="font-mono text-sm font-medium tracking-wide text-terracota">{lote.codigo}</p>
+                    <h1 className="text-3xl font-semibold sm:text-4xl">{lote.nombre}</h1>
+                  </div>
+                  {/* Un enlace normal: el PDF lo arma el servidor; no hace falta JavaScript. */}
+                  <Button asChild variant="outline" className="bg-card">
+                    <a href={`/lotes/${lote.id}/reporte.pdf`} target="_blank" rel="noopener">
+                      <FileDown aria-hidden />
+                      Reporte en PDF
+                    </a>
+                  </Button>
+                </div>
                 <p className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-muted-foreground">
                   {lote.finca && (
                     <span className="inline-flex items-center gap-1">

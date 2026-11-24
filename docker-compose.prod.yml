@@ -17,6 +17,8 @@ x-backend: &backend
   environment:
     CONFIG_DIR: /config
     HF_HOME: /home/app/.cache/huggingface
+    # El QR del reporte PDF lleva a la página pública del lote en el panel (D-023).
+    PUBLIC_WEB_URL: https://${WEB_DOMAIN:?falta WEB_DOMAIN en el .env}
   volumes:
     - ./config:/config:ro
     - hf_cache:/home/app/.cache/huggingface
@@ -56,6 +58,7 @@ services:
     environment:
       CONFIG_DIR: /config
       HF_HOME: /home/app/.cache/huggingface
+      PUBLIC_WEB_URL: https://${WEB_DOMAIN:?falta WEB_DOMAIN en el .env}
       # uvicorn --proxy-headers solo confía en 127.0.0.1 por defecto; la api no es
       # alcanzable desde fuera de la red de Docker, así que se confía en Caddy.
       FORWARDED_ALLOW_IPS: "*"

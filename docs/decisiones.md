@@ -272,3 +272,22 @@ Formato: cada decisión tiene fecha, contexto, decisión y consecuencias. Las nu
   - Si un enlace se comparte por error, `lots.regenerate_public_token` lo invalida (todavía no hay botón en el panel).
   - El token público viaja en la URL: Caddy no registra accesos (D-019), pero quien tenga el enlace ve la historia.
   - Un `notFound()` después de que la página empezó a cargar responde 200 con la pantalla de "no encontramos" (así funciona Next.js con `loading.tsx`); no se filtra nada del lote.
+
+## D-023 · Reporte de trazabilidad en PDF con QR (panel y WhatsApp)
+- **Fecha:** 2026-11-24
+- **Contexto:** El comprador necesita un documento con la historia del lote que pueda guardar o imprimir, y desde el que llegue a la historia en línea. El caficultor debe poder pedirlo por WhatsApp sin entrar al panel.
+- **Decisión:**
+  1. **`app/reports/`:** `datos.py` arma el contenido, `pdf.py` lo pasa por una plantilla Jinja2 (`plantillas/reporte.html`) y WeasyPrint lo convierte en PDF A4. El QR (segno, SVG) lleva a `<PUBLIC_WEB_URL>/l/<token>`.
+  2. **Contenido, de una a dos páginas:** finca, ubicación, altitud, lote, variedad, proceso, periodo, mediciones clave (para cada dato con `grafica: true`: cuántas mediciones, mínimo, máximo y la última) y la línea de tiempo confirmada.
+  3. **El reporte y la página pública salen de la misma función** (`historia_publica_de_lote`): la página no muestra nada que no esté en el reporte. Solo eventos confirmados (regla de oro 2) y solo lo marcado como `publico` en `config/eventos.yaml`. Nada de teléfonos, nombres, texto original, precios, jornales ni horas.
+  4. **"No registrado", nunca estimado:** se muestra así cuando falta un dato de la ficha del lote, un dato obligatorio de un evento o una medición clave que nunca se tomó. No se calcula ni se completa nada.
+  5. **Fuentes dentro de la imagen:** Fraunces y Source Sans 3 (licencia OFL) en `app/reports/fuentes/`, cargadas con `@font-face`. Una prueba revisa que el PDF solo traiga esas fuentes, incrustadas. Al Dockerfile solo se le agregan Pango y HarfBuzz, que WeasyPrint necesita.
+  6. **`GET /lotes/{id}/reporte.pdf`** (opcional `?desde=AAAA-MM-DD&hasta=AAAA-MM-DD`), con el token del panel (D-020): un lote de otra organización da 404. El panel lo descarga por `/lotes/<id>/reporte.pdf`, que lo pide desde el servidor de Next.js para que el token no llegue al navegador.
+  7. **WhatsApp: "REPORTE LOTE 3"** (prefijos en `comandos.reporte` de `config/conversacion.yaml`, igual que RESUMEN). La conversación responde enseguida "Ya te mando el reporte…" y, después del commit, la tarea `enviar_reporte` arma el PDF y lo manda como documento. Si el lote no tiene registros confirmados no se manda nada. Si el PDF falla, se le pide que lo vuelva a intentar. Solo se manda dentro de la ventana de 24 horas.
+  8. **OpenBSP:** `send_document` sube el archivo a `/storage/v1/object/media/organizations/<org>/attachments/<sha256>` y envía `content = {type: "file", kind: "document", file: {uri: "internal://media/…"}}`. Los headers de la subida no están documentados: se usan los de la descarga (`apikey` + `api-key`).
+- **Consecuencias:**
+  - **Antes de anunciar REPORTE a los productores:** probar el envío de un documento con un número real. Si OpenBSP rechaza la subida, el log del worker dice el código y el texto de la respuesta.
+  - **Falta lo que definió Brayan** sobre qué ve el comprador. Hoy sale lo marcado `publico` (por defecto todo menos ventas, jornales y recolectores). Ajustarlo es cambiar `publico` en `config/eventos.yaml`; el reporte y la página cambian juntos.
+  - Un lote con muchos registros puede pasar de dos páginas: la tabla sigue en la página siguiente sin cortar filas. Para un comprador conviene pedir el reporte por periodo (`desde`/`hasta`), que hoy solo se puede desde la URL.
+  - En producción `PUBLIC_WEB_URL` se arma con `WEB_DOMAIN`. Si cambia el dominio, los QR de reportes ya impresos dejan de servir.
+  - El PDF no se guarda: se genera en cada pedido (la tabla `reports` sigue sin usarse).

@@ -2,9 +2,11 @@
 
 - Panel (D-020, D-022): lista de lotes con su etapa y alertas abiertas, historia
   de cada lote con el estado de cada evento, mediciones en el tiempo y alertas.
-- Página pública (D-022): solo eventos "confirmado" (regla de oro 2) y solo los
-  datos que config/eventos.yaml marca como públicos. Nunca el texto original del
-  caficultor ni datos de personas.
+- Página pública y reporte PDF (D-022, D-023): los dos salen de `historia_publica`,
+  así la página no muestra nada que no esté en el reporte. Solo eventos
+  "confirmado" (regla de oro 2) y solo los datos que config/eventos.yaml marca como
+  públicos. Nunca el texto original del caficultor ni datos de personas. Un dato
+  obligatorio que falte sale como "No registrado": nunca se estima.
 
 La etapa del lote no se guarda: sale de los eventos confirmados según
 config/alertas.yaml (ver app/domain/alertas.py). Los nombres de los eventos, de
@@ -55,6 +57,10 @@ class ResumenLote:
     # Etapa en la que va el lote según config/alertas.yaml; None si no está en ninguna.
     etapa: str | None = None
     alertas_abiertas: int = 0
+
+
+# Lo que se muestra en la página pública y en el reporte cuando falta un dato.
+NO_REGISTRADO = "No registrado"
 
 
 @dataclass(frozen=True)
@@ -216,15 +222,21 @@ def _orden_campos(evento: LotEvent, catalogo: CatalogoEventos) -> list[str]:
 
 def _datos(evento: LotEvent, catalogo: CatalogoEventos, textos: TextosConversacion,
            *, solo_publicos: bool = False) -> list[DatoVisible]:
+    """Los datos del evento en el orden del catálogo. Con `solo_publicos`, solo los
+    que puede ver un comprador, y los obligatorios que falten como "No registrado"."""
     data = evento.data or {}
+    tipo = catalogo.tipos.get(evento.event_type)
     datos = []
     for campo in _orden_campos(evento, catalogo):
+        valor = _valor(data.get(campo), textos, catalogo)
         if solo_publicos:
             definicion = _campo_def(evento.event_type, campo, catalogo)
             # Un dato que ya no está en el catálogo no se sabe si es público: no sale.
             if definicion is None or not definicion.publico:
                 continue
-        valor = _valor(data.get(campo), textos, catalogo)
+            if valor is None and tipo is not None and campo in tipo.campos \
+                    and definicion.obligatorio:
+                valor = NO_REGISTRADO
         if valor is not None:
             datos.append(DatoVisible(etiqueta=_etiqueta(evento.event_type, campo, catalogo),
                                      valor=valor))
@@ -411,16 +423,38 @@ def historia_publica(
     catalogo: CatalogoEventos | None = None,
     textos: TextosConversacion | None = None,
 ) -> HistoriaPublica | None:
-    """Solo eventos confirmados de tipos públicos y sus datos públicos. Sin texto
-    original, sin productores, sin horas. None si el token no es de un lote."""
+    """La historia que ve un comprador con el enlace o el QR. None si el token no es
+    de un lote de esta organización."""
     lote = repos.lots.get_by_public_token(organization_id, token)
     if lote is None:
         return None
+    return historia_publica_de_lote(repos, organization_id, lote, catalogo=catalogo,
+                                    textos=textos)
+
+
+def historia_publica_de_lote(
+    repos: Repositories,
+    organization_id: uuid.UUID,
+    lote: Lot,
+    *,
+    catalogo: CatalogoEventos | None = None,
+    textos: TextosConversacion | None = None,
+    desde: dt.date | None = None,
+    hasta: dt.date | None = None,
+) -> HistoriaPublica:
+    """Solo eventos confirmados de tipos públicos y sus datos públicos. Sin texto
+    original, sin productores, sin horas. Con `desde`/`hasta` (fechas de Colombia,
+    incluidas), solo los eventos de ese periodo. La usan la página pública y el
+    reporte PDF: lo que sale en uno sale en el otro."""
     catalogo = catalogo or catalogo_por_defecto()
     textos = textos or get_textos()
     org = repos.organizations.get(organization_id)
     finca = repos.farms.get(organization_id, lote.farm_id)
-    confirmados = repos.events.list_by_lot(organization_id, lote.id, status="confirmado")
+    confirmados = [
+        e for e in repos.events.list_by_lot(organization_id, lote.id, status="confirmado")
+        if (desde is None or a_hora_colombia(e.occurred_at).date() >= desde)
+        and (hasta is None or a_hora_colombia(e.occurred_at).date() <= hasta)
+    ]
     eventos = []
     for e in confirmados:
         if not _tipo_publico(e.event_type, catalogo):

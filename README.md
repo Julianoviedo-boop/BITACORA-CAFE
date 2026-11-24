@@ -158,6 +158,7 @@ backend/
     domain/         Conversación, consentimiento, alertas, límites
     transcription/  faster-whisper
     extraction/     Claude con salida estructurada
+    reports/        Reporte de trazabilidad en PDF (WeasyPrint, Jinja2, QR)
     worker/         Tareas de Celery
   alembic/          Migraciones
   tests/            Pruebas y audios de ejemplo
@@ -171,4 +172,4 @@ docs/               Especificación, decisiones y despliegue
 
 ## Estado
 
-Primera versión en construcción. Funcionan el flujo completo por WhatsApp (audio o texto → transcripción → extracción → preguntas → confirmación), las alertas y el despliegue. El panel muestra los lotes con su etapa y alertas, la historia de cada lote con el estado de cada registro y gráficas de las mediciones, y las alertas abiertas. Cada lote tiene una página pública (`/l/<token>`) para compradores, sin clave (D-022). Falta el reporte PDF con QR. Ver [docs/especificacion.md](docs/especificacion.md).
+Primera versión en construcción. Funcionan el flujo completo por WhatsApp (audio o texto → transcripción → extracción → preguntas → confirmación), las alertas y el despliegue. El panel muestra los lotes con su etapa y alertas, la historia de cada lote con el estado de cada registro y gráficas de las mediciones, y las alertas abiertas. Cada lote tiene una página pública (`/l/<token>`) para compradores, sin clave (D-022), y un reporte de trazabilidad en PDF con QR hacia esa página: se descarga desde el panel o se pide por WhatsApp con REPORTE LOTE 3 (D-023). Falta probar el envío del PDF con un número real de WhatsApp. Ver [docs/especificacion.md](docs/especificacion.md).

@@ -285,3 +285,52 @@ def test_send_template_errores_como_send_text():
     with pytest.raises(ChannelError) as exc:
         _canal(lambda r: httpx.Response(400)).send_template("1", "+573101234501", "x", "es", ["y"])
     assert not isinstance(exc.value, ChannelTemporaryError)
+
+
+# --- send_document (reporte en PDF, D-023) ---
+
+
+def test_send_document_sube_el_archivo_y_lo_envia():
+    import hashlib
+
+    pedidos = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        pedidos.append(req)
+        return httpx.Response(200 if "/storage/" in req.url.path else 201, json={})
+
+    pdf = b"%PDF-1.7 reporte"
+    _canal(handler).send_document("100000000000001", "+573101234501", pdf, "reporte-MIR-01.pdf",
+                                  "application/pdf", caption="Reporte de La Esperanza")
+
+    subida, envio = pedidos
+    llave = f"organizations/org-openbsp/attachments/{hashlib.sha256(pdf).hexdigest()}"
+    assert subida.method == "POST"
+    assert str(subida.url) == f"{BASE}/storage/v1/object/media/{llave}"
+    assert subida.headers["apikey"] == "pub-key" and subida.headers["api-key"] == "secret-key"
+    assert subida.headers["content-type"] == "application/pdf"
+    assert subida.content == pdf
+    body = json.loads(envio.content)
+    assert str(envio.url) == f"{BASE}/rest/v1/messages"
+    assert body["conversation_address"] == "573101234501"
+    assert body["content"] == {
+        "version": "1", "type": "file", "kind": "document",
+        "file": {"mime_type": "application/pdf", "uri": f"internal://media/{llave}",
+                 "name": "reporte-MIR-01.pdf", "size": len(pdf)},
+        "text": "Reporte de La Esperanza",
+    }
+
+
+def test_send_document_falla_de_subida():
+    canal = _canal(lambda req: httpx.Response(503))
+    with pytest.raises(ChannelTemporaryError):
+        canal.send_document("1", "+57300", b"x", "a.pdf", "application/pdf")
+    canal = _canal(lambda req: httpx.Response(403, text="sin permiso"))
+    with pytest.raises(ChannelError):
+        canal.send_document("1", "+57300", b"x", "a.pdf", "application/pdf")
+
+
+def test_send_document_demasiado_grande_no_se_sube():
+    canal = _canal(lambda req: pytest.fail("no debía llamar a OpenBSP"))
+    with pytest.raises(ChannelError):
+        canal.send_document("1", "+57300", b"x" * (MAX_MEDIA_BYTES + 1), "a.pdf", "application/pdf")

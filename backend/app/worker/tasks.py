@@ -9,12 +9,14 @@ from pathlib import Path
 from celery.signals import beat_init, worker_init, worker_process_init
 
 from app.channels import ChannelTemporaryError, get_channel
+from app.config import get_settings
 from app.db.repositories import unit_of_work
 from app.db.repositories.routing import list_organization_ids
 from app.domain import alertas, conversacion, limites, transcripcion
 from app.domain.consentimiento import atender_mensaje, get_textos
 from app.extraction.llm import ClienteLLM
 from app.extraction.schema import catalogo_por_defecto
+from app.reports import whatsapp as reporte_whatsapp
 from app.transcription import whisper
 from app.worker.celery_app import celery_app
 
@@ -164,7 +166,8 @@ def atender_conversacion(self, organization_id: str, message_id: str) -> str:
     try:
         return conversacion.atender(unit_of_work, get_channel(), _interprete(), textos,
                                     org_id, msg_id,
-                                    despachar_alertas=_despachar_alertas(organization_id))
+                                    despachar_alertas=_despachar_alertas(organization_id),
+                                    despachar_reporte=_despachar_reporte(organization_id))
     except (ChannelTemporaryError, conversacion.ReintentarError) as exc:
         if self.request.retries < self.max_retries:
             espera = _espera_descarga(self.request.retries)
@@ -190,6 +193,40 @@ def avisar_productor(organization_id: str, message_id: str, texto: str) -> bool:
         return transcripcion.enviar_aviso(
             repos, get_channel(), uuid.UUID(organization_id), uuid.UUID(message_id), texto
         )
+
+
+def _despachar_reporte(organization_id: str) -> conversacion.DespacharReporte:
+    def despachar(lot_id: uuid.UUID, message_id: uuid.UUID) -> None:
+        enviar_reporte.delay(organization_id, str(lot_id), str(message_id))
+    return despachar
+
+
+@celery_app.task(
+    name="enviar_reporte",
+    autoretry_for=(ChannelTemporaryError,),
+    retry_backoff=True,
+    retry_backoff_max=300,
+    max_retries=5,
+)
+def enviar_reporte(organization_id: str, lot_id: str, message_id: str) -> str:
+    """Arma el reporte en PDF del lote y se lo manda al productor que lo pidió
+    ("reporte lote 3", D-023). Si el PDF no se puede armar, le avisa."""
+    org_id, msg_id = uuid.UUID(organization_id), uuid.UUID(message_id)
+    textos = conversacion.get_textos()
+    ahora = dt.datetime.now(dt.UTC)
+    try:
+        with unit_of_work() as repos:
+            return reporte_whatsapp.enviar_reporte(
+                repos, get_channel(), textos, org_id, uuid.UUID(lot_id), msg_id,
+                base_url=get_settings().public_web_url, ahora=ahora)
+    except ChannelTemporaryError:
+        raise
+    except Exception:
+        logger.exception("reporte msg=%s lote=%s no se pudo armar o enviar", message_id, lot_id)
+        with unit_of_work() as repos:
+            reporte_whatsapp.avisar_falla(repos, get_channel(), textos, org_id, msg_id,
+                                          ahora=ahora)
+        return "error"
 
 
 def _despachar_alertas(organization_id: str) -> conversacion.DespacharAlertas:

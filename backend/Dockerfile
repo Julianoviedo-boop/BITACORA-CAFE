@@ -11,6 +11,11 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     HF_HOME=/home/app/.cache/huggingface
 # La carpeta de caché existe en la imagen con dueño "app" para que el volumen
 # nombrado herede esos permisos la primera vez que se monta.
+# Pango y HarfBuzz para WeasyPrint (reporte en PDF). Las fuentes NO salen del
+# sistema: van en app/reports/fuentes/ para que el PDF salga igual en todos lados.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends libpango-1.0-0 libpangoft2-1.0-0 libharfbuzz-subset0 \
+ && rm -rf /var/lib/apt/lists/*
 RUN groupadd --system --gid 1000 app \
  && useradd --system --uid 1000 --gid app --create-home --home-dir /home/app app \
  && mkdir -p /home/app/.cache/huggingface \

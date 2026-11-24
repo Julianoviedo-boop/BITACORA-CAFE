@@ -51,6 +51,9 @@ class Settings(BaseSettings):
     panel_api_token: str = ""
     # Organización que ve el panel. El token sirve solo para esta organización.
     panel_organization_id: str = ""
+    # Dirección del panel en internet, sin "/" al final. El QR del reporte lleva a
+    # <PUBLIC_WEB_URL>/l/<token> (la página pública del lote, D-023).
+    public_web_url: str = "http://localhost:3000"
 
     # --- Transcripción (faster-whisper) ---
     whisper_model: str = "small"

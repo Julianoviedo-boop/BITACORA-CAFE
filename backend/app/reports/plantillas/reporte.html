@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="es-CO">
+<head>
+  <meta charset="utf-8">
+  <title>Reporte de trazabilidad · {{ d.lote_nombre }} ({{ d.lote_codigo }})</title>
+  <meta name="author" content="{{ d.organizacion or 'Bitácora de Café' }}">
+  <style>
+    @font-face { font-family: "Fraunces"; font-weight: 600; src: url("fuentes/Fraunces-SemiBold.ttf"); }
+    @font-face { font-family: "Source Sans 3"; font-weight: 400; src: url("fuentes/SourceSans3-Regular.ttf"); }
+    @font-face { font-family: "Source Sans 3"; font-weight: 600; src: url("fuentes/SourceSans3-SemiBold.ttf"); }
+
+    @page {
+      size: A4;
+      margin: 14mm 15mm 16mm;
+      @bottom-left {
+        content: "Bitácora de Café · Solo registros confirmados por el caficultor";
+        font: 7.5pt "Source Sans 3"; color: #7a6f63;
+      }
+      @bottom-right {
+        content: "Página " counter(page) " de " counter(pages);
+        font: 7.5pt "Source Sans 3"; color: #7a6f63;
+      }
+    }
+
+    * { box-sizing: border-box; }
+    html { font-family: "Source Sans 3"; font-size: 9.5pt; color: #3a2f26; line-height: 1.35; }
+    body { margin: 0; }
+    h1, h2 { font-family: "Fraunces"; font-weight: 600; color: #1f3d2c; margin: 0; }
+    h1 { font-size: 20pt; line-height: 1.1; }
+    h2 { font-size: 11.5pt; margin: 14pt 0 5pt; padding-bottom: 3pt; border-bottom: 1.2pt solid #b5582f; }
+
+    .encabezado { display: flex; justify-content: space-between; gap: 12mm; align-items: flex-start; }
+    .sobre { font-size: 8pt; text-transform: uppercase; letter-spacing: .08em; color: #b5582f; font-weight: 600; }
+    .org { color: #6b6058; margin-top: 2pt; }
+    .codigo { font-weight: 600; color: #b5582f; }
+    .qr { width: 30mm; text-align: center; font-size: 7pt; color: #6b6058; }
+    .qr img { width: 30mm; height: 30mm; display: block; margin-bottom: 3pt; }
+
+    .ficha { display: flex; flex-wrap: wrap; margin-top: 9pt; border: .8pt solid #e3d8c8; border-radius: 4pt; background: #faf6ee; }
+    .ficha div { width: 33.33%; padding: 5pt 8pt; }
+    .ficha dt { font-size: 7.5pt; color: #7a6f63; }
+    .ficha dd { margin: 0; font-weight: 600; }
+    .vacio { color: #9a8f83; font-weight: 400; font-style: normal; }
+
+    .periodo { margin-top: 6pt; font-size: 8.5pt; color: #6b6058; }
+
+    table { width: 100%; border-collapse: collapse; }
+    th { text-align: left; font-size: 7.5pt; text-transform: uppercase; letter-spacing: .05em; color: #7a6f63; font-weight: 600; padding: 3pt 5pt; border-bottom: .8pt solid #d9ccb9; }
+    td { padding: 4pt 5pt; border-bottom: .5pt solid #ece3d5; vertical-align: top; }
+    tr { break-inside: avoid; }
+    .num { white-space: nowrap; }
+    .fecha { white-space: nowrap; width: 26%; color: #5c5148; }
+    .actividad { font-weight: 600; color: #1f3d2c; width: 22%; }
+    .datos span { display: inline; }
+    .datos .et { color: #7a6f63; }
+    .nada { padding: 8pt; color: #6b6058; background: #faf6ee; border-radius: 4pt; }
+    .nota { margin-top: 12pt; font-size: 7.5pt; color: #7a6f63; }
+  </style>
+</head>
+<body>
+  <header class="encabezado">
+    <div>
+      <p class="sobre">Reporte de trazabilidad</p>
+      <h1>{{ d.lote_nombre }}</h1>
+      <p class="codigo">Lote {{ d.lote_codigo }}</p>
+      {% if d.organizacion %}<p class="org">{{ d.organizacion }}</p>{% endif %}
+    </div>
+    <div class="qr">
+      <img src="{{ qr }}" alt="Código QR de la historia en línea">
+      Escanee para ver la historia en línea
+    </div>
+  </header>
+
+  <dl class="ficha">
+    {% for f in d.ficha %}
+    <div><dt>{{ f.etiqueta }}</dt><dd{% if f.valor == "No registrado" %} class="vacio"{% endif %}>{{ f.valor }}</dd></div>
+    {% endfor %}
+  </dl>
+  <p class="periodo">Periodo: {{ d.periodo }} · Generado el {{ d.generado }}</p>
+
+  <h2>Mediciones clave</h2>
+  <table>
+    <thead><tr><th>Dato</th><th>Mediciones</th><th>Mínimo</th><th>Máximo</th><th>Última</th></tr></thead>
+    <tbody>
+      {% for m in d.mediciones %}
+      <tr>
+        <td class="actividad">{{ m.dato }}</td>
+        {% for v in (m.mediciones, m.minimo, m.maximo, m.ultima) %}
+        <td class="num{% if v == 'No registrado' %} vacio{% endif %}">{{ v }}</td>
+        {% endfor %}
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <h2>Línea de tiempo confirmada</h2>
+  {% if d.eventos %}
+  <table>
+    <thead><tr><th>Fecha</th><th>Actividad</th><th>Datos</th></tr></thead>
+    <tbody>
+      {% for e in d.eventos %}
+      <tr>
+        <td class="fecha">{{ e.fecha_texto[:1]|upper }}{{ e.fecha_texto[1:] }}</td>
+        <td class="actividad">{{ e.actividad }}</td>
+        <td class="datos">
+          {% for x in e.datos %}<span class="et">{{ x.etiqueta }}:</span> <span{% if x.valor == "No registrado" %} class="vacio"{% endif %}>{{ x.valor }}</span>{% if not loop.last %} · {% endif %}{% endfor %}
+          {% if not e.datos %}<span class="vacio">Sin datos adicionales</span>{% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="nada">No registrado: este lote todavía no tiene trabajos confirmados{% if d.periodo != "No registrado" %} en este periodo{% endif %}.</p>
+  {% endif %}
+
+  <p class="nota">
+    Cada registro lo contó el caficultor por WhatsApp y lo confirmó antes de guardarlo.
+    Los datos que no se registraron aparecen como «No registrado»: no se estiman ni se completan.
+  </p>
+</body>
+</html>

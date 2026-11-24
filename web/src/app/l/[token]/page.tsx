@@ -1,8 +1,9 @@
 // Página pública del lote: la abre un comprador con el enlace o el QR, sin clave.
 // Solo trae lo que la API marca como público (D-022): eventos confirmados, sin el
-// texto original del caficultor, sin personas, precios ni horas.
+// texto original del caficultor, sin personas, precios ni horas. Muestra lo mismo
+// que el reporte PDF (D-023): los dos salen de la misma función de la api.
 
-import { ChartLine, Coffee, History, MapPin, Mountain, ShieldCheck } from "lucide-react";
+import { ChartLine, Coffee, History, ShieldCheck } from "lucide-react";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { cache } from "react";
@@ -29,12 +30,16 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 
 const numero = new Intl.NumberFormat("es-CO");
 
+// Igual que en el reporte PDF: si falta un dato se dice, no se esconde ni se estima.
+const NO_REGISTRADO = "No registrado";
+
 function Ficha({ etiqueta, valor }: { etiqueta: string; valor: string | null }) {
-  if (!valor) return null;
   return (
     <div className="rounded-lg bg-primary-foreground/10 px-3 py-2">
       <dt className="text-xs text-primary-foreground/75">{etiqueta}</dt>
-      <dd className="font-medium capitalize">{valor}</dd>
+      <dd className={valor ? "font-medium first-letter:uppercase" : "text-primary-foreground/70"}>
+        {valor || NO_REGISTRADO}
+      </dd>
     </div>
   );
 }
@@ -69,24 +74,10 @@ export default async function LotePublico({ params }: Props) {
           </p>
           <h1 className="mt-3 text-3xl font-semibold sm:text-4xl">{lote.nombre}</h1>
           <p className="mt-1 font-mono text-sm text-terracota-suave">Lote {lote.codigo}</p>
-          {(lote.finca || lugar) && (
-            <p className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-primary-foreground/90">
-              {lote.finca && (
-                <span className="inline-flex items-center gap-1">
-                  <MapPin aria-hidden className="size-4" />
-                  Finca {lote.finca}
-                  {lugar && ` · ${lugar}`}
-                </span>
-              )}
-              {lote.altitud_m && (
-                <span className="inline-flex items-center gap-1">
-                  <Mountain aria-hidden className="size-4" />
-                  {numero.format(lote.altitud_m)} m s. n. m.
-                </span>
-              )}
-            </p>
-          )}
-          <dl className="mt-5 grid grid-cols-2 gap-2 text-sm sm:max-w-sm">
+          <dl className="mt-5 grid grid-cols-2 gap-2 text-sm sm:grid-cols-3">
+            <Ficha etiqueta="Finca" valor={lote.finca} />
+            <Ficha etiqueta="Ubicación" valor={lugar || null} />
+            <Ficha etiqueta="Altitud" valor={lote.altitud_m ? `${numero.format(lote.altitud_m)} m s. n. m.` : null} />
             <Ficha etiqueta="Variedad" valor={lote.variedad} />
             <Ficha etiqueta="Proceso" valor={lote.proceso} />
           </dl>
