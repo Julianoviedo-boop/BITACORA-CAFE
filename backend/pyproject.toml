@@ -16,6 +16,10 @@ dependencies = [
     "faster-whisper>=1.1",
     "anthropic>=1.0",
     "httpx>=0.28",
+    # Reporte de trazabilidad en PDF (app/reports/)
+    "weasyprint>=66",
+    "jinja2>=3.1",
+    "segno>=1.6",
 ]
 
 [project.optional-dependencies]

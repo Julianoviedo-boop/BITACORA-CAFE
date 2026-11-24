@@ -59,6 +59,15 @@ class CampoDef:
     descripcion: str
     # Lo que se le pregunta al productor si falta (solo se usa en los obligatorios).
     pregunta: str | None = None
+    # Cómo se llama el dato en el panel ("Horas de fermentación").
+    etiqueta: str | None = None
+    # El panel lo dibuja en la gráfica de mediciones del lote (solo numero).
+    grafica: bool = False
+    # Se muestra en la página pública del lote (la que ve un comprador).
+    publico: bool = True
+
+    def nombre_visible(self) -> str:
+        return self.etiqueta or etiqueta_por_defecto(self.clave)
 
 
 @dataclass(frozen=True)
@@ -68,6 +77,8 @@ class TipoEventoDef:
     descripcion: str
     requiere_lote: bool
     campos: dict[str, CampoDef]
+    # Si el evento sale en la página pública del lote (la que ve un comprador).
+    publico: bool = True
 
     def obligatorios(self) -> list[str]:
         """Lo que hay que preguntar si falta, en el orden en que se pregunta."""
@@ -86,8 +97,21 @@ class CatalogoEventos:
         return [FALTANTE_LOTE, FALTANTE_FECHA] + list(self.campos)
 
 
+def etiqueta_por_defecto(clave: str) -> str:
+    """Nombre del campo cuando eventos.yaml no trae etiqueta: cantidad_cereza -> Cantidad cereza."""
+    texto = clave.replace("_", " ").strip()
+    return texto[:1].upper() + texto[1:]
+
+
 def _es_clave(valor: Any) -> bool:
     return isinstance(valor, str) and valor.isidentifier() and valor.isascii() and valor.islower()
+
+
+def _si_no(valor: Any, donde: str) -> bool:
+    # Un "no" o un "false" entre comillas sería verdadero con bool(): mejor avisar.
+    if not isinstance(valor, bool):
+        raise CatalogoInvalidoError(f"{donde}: debe ser true o false")
+    return valor
 
 
 def cargar_catalogo(config_dir: str | Path) -> CatalogoEventos:
@@ -135,15 +159,21 @@ def cargar_catalogo(config_dir: str | Path) -> CatalogoEventos:
             desconocidas = [x for x in u if x not in unidades]
             if desconocidas:
                 raise CatalogoInvalidoError(f"{donde_c}: unidades desconocidas {desconocidas}")
+            grafica = _si_no(c.get("grafica", False), f"{donde_c}.grafica")
+            if grafica and tipo != "numero":
+                raise CatalogoInvalidoError(f"{donde_c}: solo un campo numérico va en la gráfica")
             campos[clave_campo] = CampoDef(
                 clave=clave_campo, tipo=tipo, obligatorio=bool(c.get("obligatorio", False)),
                 unidades=u, descripcion=str(c.get("descripcion", "")).strip(),
                 pregunta=str(c.get("pregunta") or "").strip() or None,
+                etiqueta=str(c.get("etiqueta") or "").strip() or None,
+                grafica=grafica, publico=_si_no(c.get("publico", True), f"{donde_c}.publico"),
             )
         tipos[clave_tipo] = TipoEventoDef(
             clave=clave_tipo, nombre=str(t["nombre"]).strip(),
             descripcion=" ".join(str(t["descripcion"]).split()),
             requiere_lote=bool(t.get("requiere_lote", True)), campos=campos,
+            publico=_si_no(t.get("publico", True), f"{donde}.publico"),
         )
     return CatalogoEventos(unidades=dict(unidades), tipos=tipos, campos=campos_globales)
 

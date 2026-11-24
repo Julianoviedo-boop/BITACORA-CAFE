@@ -52,6 +52,8 @@ Lo que hace que funcione en el mundo real:
 - **Multi-organización desde la base.** Cada consulta exige `organization_id`; las claves foráneas compuestas impiden mezclar datos entre asociaciones, y hay pruebas que lo verifican.
 - **Reglas del café en YAML, no en el código.** Los tipos de evento, las etapas, las alertas y los límites viven en [`config/`](config/) y se validan al arrancar: un agrónomo puede ajustarlos sin programar.
 - **Alertas por valor y por tiempo.** "La fermentación pasó de 24 °C" o "12 horas fermentando sin volteo", respetando la ventana de 24 horas de WhatsApp.
+- **Panel para la asociación.** Lotes con su etapa y alertas, la historia de cada lote en una línea de tiempo con lo que dijo el caficultor, y gráficas de temperatura y humedad.
+- **Trazabilidad para el comprador.** Un reporte en PDF con QR (desde el panel o escribiendo `REPORTE LOTE 3` por WhatsApp) y una página pública por lote, sin clave. Solo muestran lo confirmado y lo que la asociación marcó como público; lo que falta dice «No registrado», nunca se estima.
 - **Protección de datos y de costos.** Autorización de tratamiento de datos antes de procesar nada, topes de mensajes por productor y por organización, y límite de duración de audios.
 
 Las decisiones de diseño, con su contexto y consecuencias, están en [docs/decisiones.md](docs/decisiones.md).
@@ -66,7 +68,8 @@ Las decisiones de diseño, con su contexto y consecuencias, están en [docs/deci
 | Transcripción | faster-whisper, modelo `small` en CPU (int8) |
 | Extracción | API de Claude con salida estructurada |
 | Canal | WhatsApp vía OpenBSP |
-| Panel | Next.js + Tailwind |
+| Reporte | WeasyPrint + Jinja2, QR con segno, fuentes incluidas en la imagen |
+| Panel | Next.js + Tailwind + shadcn/ui, gráficas con Recharts |
 | Infraestructura | Docker Compose, Caddy (HTTPS automático), GitHub Actions, GHCR |
 
 ## Arquitectura en producción
@@ -108,6 +111,8 @@ docker compose ps           # api, db y redis deben quedar "healthy"
 docker compose exec api python /scripts/seed.py      # datos de ejemplo (2 organizaciones)
 ```
 
+Para ver los lotes en el panel, ponga en el `.env` un `PANEL_API_TOKEN` (32 caracteres o más) y en `PANEL_ORGANIZATION_ID` el id de una organización del seed (lo imprime `seed.py`), y luego `docker compose up -d --force-recreate api web`.
+
 El primer build tarda varios minutos (faster-whisper). El modelo de Whisper se guarda en el volumen `hf_cache` y solo se descarga una vez.
 
 Sin WhatsApp ni llave de Claude se puede probar con el canal falso (`WHATSAPP_CHANNEL=fake`, el valor por defecto) y el simulador:
@@ -123,7 +128,7 @@ Todos los puertos quedan en `127.0.0.1`.
 | Servicio | URL | Para qué |
 |---|---|---|
 | api | http://localhost:8000 · [docs](http://localhost:8000/docs) | FastAPI con recarga automática |
-| web | http://localhost:3000 | Panel |
+| web | http://localhost:3000 | Panel (lotes, alertas, reporte PDF) y página pública `/l/<token>` |
 | adminer | http://localhost:8081 | Ver la base (servidor: `db`) |
 | flower | http://localhost:5555 | Tareas de Celery |
 | dozzle | http://localhost:8888 | Logs de todos los contenedores |
@@ -132,7 +137,7 @@ Todos los puertos quedan en `127.0.0.1`.
 ### Pruebas
 
 ```bash
-docker compose exec -e REQUIRE_DB_TESTS=1 api pytest     # ~860 pruebas, con PostgreSQL real
+docker compose exec -e REQUIRE_DB_TESTS=1 api pytest     # ~970 pruebas, con PostgreSQL real
 curl http://localhost:8000/health                         # {"status":"ok","checks":{...}}
 ```
 
@@ -158,6 +163,7 @@ backend/
     domain/         Conversación, consentimiento, alertas, límites
     transcription/  faster-whisper
     extraction/     Claude con salida estructurada
+    reports/        Reporte de trazabilidad en PDF (WeasyPrint, Jinja2, QR)
     worker/         Tareas de Celery
   alembic/          Migraciones
   tests/            Pruebas y audios de ejemplo
@@ -171,4 +177,4 @@ docs/               Especificación, decisiones y despliegue
 
 ## Estado
 
-Primera versión en construcción. Funcionan el flujo completo por WhatsApp (audio o texto → transcripción → extracción → preguntas → confirmación), las alertas y el despliegue. Faltan el reporte de trazabilidad por lote y las vistas del panel (historia del lote, alertas, eventos pendientes para el asesor). Ver [docs/especificacion.md](docs/especificacion.md).
+Primera versión en construcción. Funcionan el flujo completo por WhatsApp (audio o texto → transcripción → extracción → preguntas → confirmación), las alertas y el despliegue. El panel muestra los lotes con su etapa y alertas, la historia de cada lote con el estado de cada registro y gráficas de las mediciones, y las alertas abiertas. Cada lote tiene una página pública (`/l/<token>`) para compradores, sin clave (D-022), y un reporte de trazabilidad en PDF con QR hacia esa página: se descarga desde el panel o se pide por WhatsApp con REPORTE LOTE 3 (D-023). Falta probar el envío del PDF con un número real de WhatsApp. Ver [docs/especificacion.md](docs/especificacion.md).

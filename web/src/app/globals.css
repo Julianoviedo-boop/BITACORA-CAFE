@@ -1,1 +1,113 @@
 @import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-terracota: var(--terracota);
+  --color-terracota-foreground: var(--terracota-foreground);
+  --color-terracota-suave: var(--terracota-suave);
+  --color-verde-suave: var(--verde-suave);
+  --color-papel: var(--papel);
+  --font-sans: var(--font-texto), ui-sans-serif, system-ui, sans-serif;
+  --font-serif: var(--font-titulos), ui-serif, Georgia, serif;
+}
+
+/*
+ * Paleta de finca: verde profundo de cafetal, terracota de teja y tierra,
+ * fondo de papel crudo. Solo modo claro: el panel se usa de día y en campo.
+ */
+:root {
+  --radius: 0.75rem;
+  --papel: oklch(0.975 0.012 85);
+  --background: oklch(0.965 0.014 82);
+  --foreground: oklch(0.26 0.025 60);
+  --card: oklch(0.99 0.006 85);
+  --card-foreground: oklch(0.26 0.025 60);
+  --popover: oklch(0.99 0.006 85);
+  --popover-foreground: oklch(0.26 0.025 60);
+  /* Verde profundo */
+  --primary: oklch(0.38 0.07 155);
+  --primary-foreground: oklch(0.97 0.015 85);
+  --verde-suave: oklch(0.93 0.035 150);
+  /* Terracota */
+  --terracota: oklch(0.56 0.13 40);
+  --terracota-foreground: oklch(0.98 0.01 70);
+  --terracota-suave: oklch(0.94 0.035 50);
+  --secondary: oklch(0.93 0.02 80);
+  --secondary-foreground: oklch(0.3 0.03 60);
+  --muted: oklch(0.935 0.016 80);
+  --muted-foreground: oklch(0.47 0.025 60);
+  --accent: oklch(0.93 0.025 80);
+  --accent-foreground: oklch(0.3 0.03 60);
+  --destructive: oklch(0.52 0.17 30);
+  --border: oklch(0.88 0.02 75);
+  --input: oklch(0.88 0.02 75);
+  --ring: oklch(0.45 0.08 155);
+  --chart-1: oklch(0.56 0.13 40);
+  --chart-2: oklch(0.42 0.08 155);
+  --chart-3: oklch(0.6 0.1 85);
+  --chart-4: oklch(0.45 0.06 60);
+  --chart-5: oklch(0.55 0.07 200);
+  --sidebar: oklch(0.975 0.012 85);
+  --sidebar-foreground: oklch(0.26 0.025 60);
+  --sidebar-primary: oklch(0.38 0.07 155);
+  --sidebar-primary-foreground: oklch(0.97 0.015 85);
+  --sidebar-accent: oklch(0.93 0.025 80);
+  --sidebar-accent-foreground: oklch(0.3 0.03 60);
+  --sidebar-border: oklch(0.88 0.02 75);
+  --sidebar-ring: oklch(0.45 0.08 155);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  html {
+    color-scheme: light;
+  }
+  body {
+    @apply bg-background text-foreground font-sans;
+  }
+  h1,
+  h2,
+  h3 {
+    @apply font-serif tracking-tight;
+  }
+}

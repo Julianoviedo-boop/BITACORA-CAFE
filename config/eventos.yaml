@@ -14,13 +14,21 @@
 #       nombre: texto para el productor ("Abonada")
 #       descripcion: qué cuenta como este evento (lo lee Claude)
 #       requiere_lote: si el evento siempre es de un lote (por defecto true)
+#       publico: si sale en la página pública del lote, la que ve un comprador
+#                (por defecto true). false para lo que es solo de la finca.
 #       campos:
 #         <campo>:
 #           tipo: numero | texto
+#           etiqueta: cómo se llama el dato en el panel ("Horas de fermentación")
 #           obligatorio: true | false   (por defecto false)
 #           unidades: [..]              (solo numero; claves de "unidades" abajo)
 #           descripcion: qué es y cómo lo dice el productor
 #           pregunta: lo que se le pregunta al productor si falta (obligatorios)
+#           grafica: true si es una medición que el panel dibuja en el tiempo
+#                    (solo numero; por defecto false)
+#           publico: false si el dato no debe salir en la página pública del
+#                    lote (costos, trabajadores...). Por defecto true. El texto
+#                    original del caficultor nunca sale en la página pública.
 #
 # Un mismo nombre de campo puede estar en varios tipos, pero con el mismo "tipo".
 # La fecha y el lote son comunes a todos los eventos y no se declaran aquí.
@@ -60,23 +68,28 @@ tipos:
     campos:
       insumo:
         tipo: texto
+        etiqueta: Abono
         obligatorio: true
         descripcion: Nombre o fórmula del abono tal como lo dijo (p. ej. "17-6-18", "cal dolomita").
         pregunta: ¿Qué abono echaste? Por ejemplo, 17-6-18, DAP o urea.
       cantidad:
         tipo: numero
+        etiqueta: Cantidad
         obligatorio: true
         unidades: [bulto, kg, g, arroba]
         descripcion: Cantidad total aplicada en el lote.
         pregunta: ¿Cuánto abono echaste en total? Por ejemplo, 4 bultos.
       dosis:
         tipo: numero
+        etiqueta: Dosis
         unidades: [g_por_planta, kg_por_surco, bulto_por_surco]
         descripcion: Cantidad por planta o por surco, si la dijo así.
       jornales:
         tipo: numero
+        etiqueta: Jornales
         unidades: [jornal, persona]
         descripcion: Jornales o trabajadores que hicieron la labor.
+        publico: false
 
   fumigacion:
     nombre: Fumigación
@@ -86,28 +99,35 @@ tipos:
     campos:
       producto:
         tipo: texto
+        etiqueta: Producto
         obligatorio: true
         descripcion: Nombre comercial o ingrediente del producto aplicado.
         pregunta: ¿Qué producto aplicaste?
       objetivo:
         tipo: texto
+        etiqueta: Para qué
         descripcion: Plaga, enfermedad o maleza que se quería controlar (broca, roya...).
       dosis:
         tipo: numero
+        etiqueta: Dosis
         unidades: [cc_por_caneca, litro_por_caneca, g_por_caneca]
         descripcion: Cuánto producto por caneca.
       volumen:
         tipo: numero
+        etiqueta: Mezcla aplicada
         unidades: [caneca, litro]
         descripcion: Cuántas canecas o litros de mezcla se aplicaron en total.
       dias_carencia:
         tipo: numero
+        etiqueta: Días de carencia
         unidades: [dia]
         descripcion: Días de carencia del producto, solo si los dijo.
       jornales:
         tipo: numero
+        etiqueta: Jornales
         unidades: [jornal, persona]
         descripcion: Jornales o trabajadores que hicieron la labor.
+        publico: false
 
   desyerba:
     nombre: Desyerba
@@ -118,11 +138,14 @@ tipos:
     campos:
       metodo:
         tipo: texto
+        etiqueta: Cómo se hizo
         descripcion: Cómo se hizo (guadaña, machete, plateo a mano...).
       jornales:
         tipo: numero
+        etiqueta: Jornales
         unidades: [jornal, persona]
         descripcion: Jornales o trabajadores que hicieron la labor.
+        publico: false
 
   recoleccion:
     nombre: Recolección
@@ -130,16 +153,20 @@ tipos:
     campos:
       cantidad_cereza:
         tipo: numero
+        etiqueta: Café cereza
         obligatorio: true
         unidades: [kg, arroba]
         descripcion: Café cereza recogido.
         pregunta: ¿Cuánto café cereza recogieron? En kilos o arrobas.
       recolectores:
         tipo: numero
+        etiqueta: Recolectores
         unidades: [persona]
         descripcion: Número de recolectores.
+        publico: false
       pase:
         tipo: texto
+        etiqueta: Pase
         descripcion: Tipo de pase si lo dijo (graneo, traviesa, repase).
 
   beneficio:
@@ -150,17 +177,21 @@ tipos:
     campos:
       etapa:
         tipo: texto
+        etiqueta: Etapa
         obligatorio: true
         descripcion: Etapa o etapas hechas (despulpado, fermentación, lavado).
         pregunta: ¿Qué le hiciste al café? Despulpado, fermentación o lavado.
       cantidad:
         tipo: numero
+        etiqueta: Cantidad
         unidades: [kg, arroba]
         descripcion: Cantidad de café procesado.
       horas_fermentacion:
         tipo: numero
+        etiqueta: Horas de fermentación
         unidades: [hora]
         descripcion: Horas de fermentación, si las dijo.
+        grafica: true
 
   secado:
     nombre: Secado
@@ -168,38 +199,48 @@ tipos:
     campos:
       cantidad_seco:
         tipo: numero
+        etiqueta: Café seco
         obligatorio: true
         unidades: [kg, arroba, carga]
         descripcion: Café pergamino seco que quedó.
         pregunta: ¿Cuánto café seco quedó? En kilos, arrobas o cargas.
       metodo:
         tipo: texto
+        etiqueta: Cómo se hizo
         descripcion: Dónde o cómo se secó (marquesina, patio, silo).
       humedad:
         tipo: numero
+        etiqueta: Humedad
         unidades: [porcentaje]
         descripcion: Humedad final del grano, si la midió.
+        grafica: true
 
   venta:
     nombre: Venta
     descripcion: Venta de café a una cooperativa, comprador o trilladora.
     requiere_lote: false
+    # Precios y compradores son del negocio de la finca, no de la historia del lote.
+    publico: false
     campos:
       cantidad:
         tipo: numero
+        etiqueta: Cantidad
         obligatorio: true
         unidades: [kg, arroba, carga]
         descripcion: Cantidad vendida.
         pregunta: ¿Cuánto café vendiste? En kilos, arrobas o cargas.
       tipo_cafe:
         tipo: texto
+        etiqueta: Tipo de café
         descripcion: Qué café vendió (pergamino seco, cereza, pasilla).
       precio:
         tipo: numero
+        etiqueta: Precio
         unidades: [peso_por_kg, peso_por_arroba, peso_por_carga, peso]
         descripcion: Precio, solo si lo dijo.
       comprador:
         tipo: texto
+        etiqueta: Comprador
         descripcion: A quién le vendió (cooperativa, comprador...).
 
   monitoreo_sanitario:
@@ -210,16 +251,20 @@ tipos:
     campos:
       problema:
         tipo: texto
+        etiqueta: Plaga o enfermedad
         obligatorio: true
         descripcion: Plaga o enfermedad observada.
         pregunta: ¿Qué plaga o enfermedad viste?
       afectacion:
         tipo: texto
+        etiqueta: Afectación
         descripcion: Cuánto o dónde (p. ej. "varias matas en la parte de abajo").
       porcentaje:
         tipo: numero
+        etiqueta: Porcentaje afectado
         unidades: [porcentaje]
         descripcion: Porcentaje de infestación, solo si lo midió.
+        grafica: true
 
   # --- PROVISIONALES (2026-11-13) -------------------------------------------
   # Agregados para que funcionen las alertas provisionales de config/alertas.yaml.
@@ -234,8 +279,10 @@ tipos:
     campos:
       temperatura:
         tipo: numero
+        etiqueta: Temperatura
         unidades: [grado_celsius]
         descripcion: Temperatura de la masa, solo si la midió.
+        grafica: true
 
   medicion_fermentacion:
     nombre: Medición de la fermentación
@@ -245,9 +292,11 @@ tipos:
     campos:
       temperatura:
         tipo: numero
+        etiqueta: Temperatura
         obligatorio: true
         unidades: [grado_celsius]
         descripcion: Temperatura de la masa en fermentación.
+        grafica: true
         pregunta: ¿A cuántos grados estaba el café? Por ejemplo, 25 grados.
 
   medicion_humedad:
@@ -258,7 +307,9 @@ tipos:
     campos:
       humedad:
         tipo: numero
+        etiqueta: Humedad
         obligatorio: true
         unidades: [porcentaje]
         descripcion: Humedad del grano medida.
+        grafica: true
         pregunta: ¿Cuánta humedad marcó el café? Por ejemplo, 11,5 por ciento.

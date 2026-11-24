@@ -45,6 +45,16 @@ class Settings(BaseSettings):
     # Canal falso: carpeta de donde se leen los audios/imágenes "fixture://<nombre>".
     fake_media_dir: str = "tests/fixtures"
 
+    # --- Panel web (ver docs/decisiones.md, D-020) ---
+    # Token que manda el servidor del panel en `Authorization: Bearer` (mínimo 32
+    # caracteres). Vacío = los endpoints /panel responden 503.
+    panel_api_token: str = ""
+    # Organización que ve el panel. El token sirve solo para esta organización.
+    panel_organization_id: str = ""
+    # Dirección del panel en internet, sin "/" al final. El QR del reporte lleva a
+    # <PUBLIC_WEB_URL>/l/<token> (la página pública del lote, D-023).
+    public_web_url: str = "http://localhost:3000"
+
     # --- Transcripción (faster-whisper) ---
     whisper_model: str = "small"
     whisper_device: str = "cpu"

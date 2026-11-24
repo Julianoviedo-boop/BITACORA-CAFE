@@ -98,6 +98,7 @@ def test_yaml_minimo_carga(tmp_path):
     ({'ayuda: ["ayuda"]': 'ayuda: ["mis lotes"]'}, "está en"),
     ({"generica: c": "generica: ''"}, "generica"),
     ({"confirmado: x, ": ""}, "confirmado"),
+    ({'resumen: ["resumen"]': 'resumen: ["resumen"], consulta: [no]'}, "comillas"),
 ])
 def test_yaml_invalido(tmp_path, cambio, error):
     (tmp_path / "conversacion.yaml").write_text(_yaml_minimo(**cambio), encoding="utf-8")
@@ -116,12 +117,63 @@ def test_yaml_invalido(tmp_path, cambio, error):
     ("Bórralo", ("cancelar", None)), ("Mis lotes", ("mis_lotes", None)), ("ayuda", ("ayuda", None)),
     ("Resumen lote 3", ("resumen", "3")), ("resumen del lote La Esperanza", ("resumen", "la esperanza")),
     ("resumen", ("resumen", None)),
+    ("Reporte lote 3", ("reporte", "3")), ("REPORTE del lote La Esperanza", ("reporte", "la esperanza")),
+    ("pdf lote 3", ("reporte", "3")), ("reporte", ("reporte", None)),
+    ("Reporte de hoy: abonamos el lote 3 con cuatro bultos", ("texto", None)),
     ("Resumen de la semana: el lunes abonamos el 3 y el martes fumigamos", ("texto", None)),
     ("sí, pero fueron 5 bultos", ("texto", None)), ("👍", ("vacio", None)), ("", ("vacio", None)),
     (None, ("vacio", None)),
 ])
 def test_clasificar(textos, texto, esperado):
     assert clasificar(texto, textos) == esperado
+
+
+_LOTES = [LoteContexto("LOTE-001", "La Esperanza"), LoteContexto("LOTE-003", "Lote 3")]
+
+
+@pytest.mark.parametrize("texto,lote", [
+    ("¿Cómo va el lote 3?", "3"),
+    ("como va el 3", "3"),
+    ("¿Cómo está el lote 3?", "3"),
+    ("¿Cómo va La Esperanza?", "esperanza"),
+    ("¿Qué se ha hecho en el lote La Esperanza?", "la esperanza"),
+    ("Cómo vamos con el lote 3", "3"),
+    ("¿En qué va el LOTE-003?", "003"),
+    ("historia del lote 3", "3"),
+    ("Hola, ¿cómo va el lote 3?", "3"),
+    ("Buenos días. ¿Cómo sigue el lote 3? Gracias", "3"),
+    ("como va el lote 9", "9"),  # no existe: se le dice que no lo encontró
+])
+def test_consulta_por_un_lote(textos, texto, lote):
+    assert clasificar(texto, textos, _LOTES) == ("resumen", lote)
+
+
+@pytest.mark.parametrize("texto", [
+    # Cuenta una labor: es un registro aunque empiece como pregunta.
+    "¿Cómo está el lote 3? Hoy le echamos 4 bultos de 17-6-18",
+    "como esta el lote 3 hay mucha roya en la parte de abajo",
+    "Cómo le parece que hoy abonamos el lote 3",
+    # No pregunta por un lote.
+    "¿Cómo está usted?",
+    "como va todo",
+    "como esta el clima por alla",
+    "cómo va",
+    "hola",
+])
+def test_no_es_consulta(textos, texto):
+    assert clasificar(texto, textos, _LOTES) == ("texto", None)
+
+
+def test_saludo_y_cortesia_con_otros_comandos(textos):
+    assert clasificar("Hola, mis lotes por favor", textos) == ("mis_lotes", None)
+    assert clasificar("buenas tardes, resumen lote 3", textos) == ("resumen", "3")
+    assert clasificar("sí, gracias", textos) == ("confirmar", None)
+
+
+def test_sin_consultas_en_el_yaml_no_hay_consultas(tmp_path):
+    (tmp_path / "conversacion.yaml").write_text(_yaml_minimo(), encoding="utf-8")
+    textos = cargar_textos(tmp_path)
+    assert clasificar("como va el lote 3", textos, _LOTES) == ("texto", None)
 
 
 @pytest.mark.parametrize("estado,rondas,intencion,accion", [

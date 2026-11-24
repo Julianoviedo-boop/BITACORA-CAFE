@@ -228,3 +228,66 @@ Formato: cada decisión tiene fecha, contexto, decisión y consecuencias. Las nu
   - Las migraciones se aplican con la api detenida solo en `volver_version.sh`; al actualizar, la api vieja sigue atendiendo mientras migra la nueva. Las migraciones deben ser compatibles hacia atrás durante ese momento (agregar antes de quitar).
   - Un solo servidor: si se cae, no hay servicio hasta restaurarlo (pasos en `docs/despliegue.md`, sección 11). OpenBSP reintenta los webhooks, pero no indefinidamente.
   - `dozzle` usa la etiqueta `latest` y monta el socket de Docker en solo lectura; está solo en `127.0.0.1`.
+
+## D-020 · Panel: lista de lotes e historia, con clave y un token por organización
+- **Fecha:** 2026-11-24
+- **Contexto:** El panel solo tenía la página de estado. Hay que mostrar los lotes y la historia de cada uno. El panel y la api quedan en internet (D-019) y la historia trae datos de los caficultores (D-013), pero todavía no hay usuarios ni inicio de sesión.
+- **Decisión:**
+  1. **Endpoints de solo lectura** `GET /panel/lotes` y `GET /panel/lotes/{id}` (`app/api/panel.py`). La lógica está en `app/domain/historia_lote.py`.
+  2. **Los llama el servidor de Next.js, nunca el navegador**, con `Authorization: Bearer <PANEL_API_TOKEN>`. El token vale para **una sola organización**, `PANEL_ORGANIZATION_ID`, que la api lee de su propio `.env`: no se puede pedir otra organización cambiando un parámetro (regla de oro 1). Un lote de otra organización da 404. Sin token o sin organización bien configurados, los endpoints responden 503.
+  3. **Clave de acceso al panel** con HTTP Basic (`web/src/proxy.ts`, usuario y clave en `PANEL_USUARIO` y `PANEL_CLAVE`). En producción, si faltan, el panel responde 503 en lugar de quedar abierto. En desarrollo se entra sin clave.
+  4. **La historia solo muestra eventos confirmados** (regla de oro 2), del más antiguo al más nuevo, con la fecha y la hora de Colombia. Un evento a las 00:00 se muestra sin hora (así quedan los que no la dijeron, D-016).
+  5. **Nombres desde la configuración:** la actividad sale de `nombre` en `config/eventos.yaml`, cada dato de su nuevo campo opcional `etiqueta` (si falta, la clave con espacios: `cantidad_cereza` → "Cantidad cereza") y las unidades de `config/conversacion.yaml`. El formato de los números y las unidades es el mismo del resumen que se le manda al caficultor por WhatsApp.
+- **Consecuencias:**
+  - Un panel por organización: para varias organizaciones hay que levantar un panel con su propio token o, mejor, hacer inicio de sesión con usuarios. Cuando exista, reemplaza este token y la clave Basic.
+  - Todos los que entran al panel comparten un usuario y una clave: no se sabe quién vio qué. Cambie la clave si se va alguien del equipo.
+  - La lista muestra hasta 500 lotes (el máximo de los repositorios), sin paginar.
+
+
+## D-021 · Consultas por WhatsApp: "¿cómo va el lote 3?"
+- **Fecha:** 2026-11-24
+- **Contexto:** El caficultor ya podía escribir RESUMEN LOTE 3, pero lo natural es preguntar "¿cómo va el lote 3?". Esa pregunta llegaba a Claude como si fuera un registro: en el mejor caso respondía "no te entendí"; en el peor, podía armar un evento.
+- **Decisión:**
+  1. **Lista de preguntas en `config/conversacion.yaml`** (`comandos.consulta`: "cómo va", "cómo está", "qué se ha hecho en", "historia del"...). Responden igual que RESUMEN, **sin llamar a Claude y sin crear eventos**. Como los otros comandos, funcionan en cualquier momento y no cambian el estado de la conversación (si había algo por confirmar, se le recuerda).
+  2. **Solo es consulta si lo que sigue es un lote y es corto** (hasta 4 palabras): dice "lote", trae un número o es el nombre o el código de un lote de la organización. Así "¿cómo está usted?" no es una consulta, y "¿cómo está el lote 3? hoy le echamos abono" sigue siendo un registro.
+  3. **Saludos al inicio y cortesías al final** (`comandos.saludos`, `comandos.cortesias`) se quitan antes de buscar cualquier comando: "Hola, ¿cómo va el lote 3?" y "mis lotes por favor" funcionan.
+  4. **Mensaje corto:** los últimos 5 registros confirmados, el más reciente primero. Si hay más, una línea con el total (`textos.resumen_total`).
+- **Consecuencias:**
+  - Una pregunta que no esté en la lista o sea más larga ("¿cómo va el secado del lote 3?") sigue yendo a Claude. El prompt ya le pide devolver cero eventos ante una pregunta, así que el caficultor recibe "no te entendí" y no se guarda nada. Si aparecen preguntas frecuentes que no están, se agregan a la lista.
+  - Los números dichos con palabras ("el lote tres") no se reconocen como lote. Es la misma limitación que tiene RESUMEN.
+
+## D-022 · Panel completo y página pública del lote (/l/<token>)
+- **Fecha:** 2026-11-24
+- **Contexto:** El panel (D-020) solo tenía la lista de lotes y la historia confirmada. Faltaban la etapa y las alertas de cada lote, el estado de los eventos, las mediciones en el tiempo, la pantalla de alertas y una página para que un comprador vea la historia del lote sin clave.
+- **Decisión:**
+  1. **Panel con shadcn/ui** (Next.js + Tailwind 4), paleta de finca: verde profundo y terracota sobre fondo crudo, títulos con serifa. Cada pantalla tiene estado de carga (`loading.tsx`), de error (`error.tsx`) y vacío.
+  2. **Lista de lotes:** etapa (calculada con `etapas:` de `config/alertas.yaml`, que ahora acepta `nombre`), último registro y alertas abiertas. La etapa de todos los lotes sale de una sola consulta (`events.list_by_status`).
+  3. **Detalle del lote:** línea de tiempo con ícono por tipo de evento y **estado** de cada uno (confirmado, esperando confirmación, cancelado). Cambia D-020.4: el panel ahora muestra también los pendientes y cancelados, marcados; solo los confirmados cuentan en el número de registros, en la etapa y en las gráficas (regla de oro 2).
+  4. **Mediciones:** los datos con `grafica: true` en `config/eventos.yaml` (temperatura, humedad, horas de fermentación, porcentaje afectado). Una gráfica por dato y unidad: la temperatura de volteos y mediciones va junta.
+  5. **Alertas:** `GET /panel/alertas`, las abiertas de la organización del token, la más reciente primero, con si ya se le avisó al caficultor.
+  6. **Página pública** `/l/<token>` (Next.js) y `GET /publico/lotes/{token}` (API), sin clave. El token del lote (256 bits, `lots.public_token`) es la llave. Para hallar la organización hay una tercera excepción explícita a la regla de oro 1 en `app/db/repositories/routing.py`: solo devuelve el id de la organización, y el lote se busca después con `organization_id`. El proxy del panel (`web/src/proxy.ts`) deja pasar `/l/` sin la clave Basic.
+  7. **Qué ve el comprador:** solo eventos confirmados de tipos con `publico` (por defecto sí) y solo sus datos con `publico` (por defecto sí). Se marcaron `publico: false` la venta (precios y compradores), los jornales y los recolectores. Nunca salen el texto original del caficultor, nombres ni teléfonos, ni la hora. Un tipo o dato que ya no esté en el catálogo no sale. La página pide a los buscadores no indexarla.
+- **Consecuencias:**
+  - Antes de mandarle el enlace a un comprador, revisar con Brayan qué datos son aptos: basta con cambiar `publico` en `config/eventos.yaml`, sin tocar código. Hoy salen, por ejemplo, la broca o la roya que se vio en el lote.
+  - Si un enlace se comparte por error, `lots.regenerate_public_token` lo invalida (todavía no hay botón en el panel).
+  - El token público viaja en la URL: Caddy no registra accesos (D-019), pero quien tenga el enlace ve la historia.
+  - Un `notFound()` después de que la página empezó a cargar responde 200 con la pantalla de "no encontramos" (así funciona Next.js con `loading.tsx`); no se filtra nada del lote.
+
+## D-023 · Reporte de trazabilidad en PDF con QR (panel y WhatsApp)
+- **Fecha:** 2026-11-24
+- **Contexto:** El comprador necesita un documento con la historia del lote que pueda guardar o imprimir, y desde el que llegue a la historia en línea. El caficultor debe poder pedirlo por WhatsApp sin entrar al panel.
+- **Decisión:**
+  1. **`app/reports/`:** `datos.py` arma el contenido, `pdf.py` lo pasa por una plantilla Jinja2 (`plantillas/reporte.html`) y WeasyPrint lo convierte en PDF A4. El QR (segno, SVG) lleva a `<PUBLIC_WEB_URL>/l/<token>`.
+  2. **Contenido, de una a dos páginas:** finca, ubicación, altitud, lote, variedad, proceso, periodo, mediciones clave (para cada dato con `grafica: true`: cuántas mediciones, mínimo, máximo y la última) y la línea de tiempo confirmada.
+  3. **El reporte y la página pública salen de la misma función** (`historia_publica_de_lote`): la página no muestra nada que no esté en el reporte. Solo eventos confirmados (regla de oro 2) y solo lo marcado como `publico` en `config/eventos.yaml`. Nada de teléfonos, nombres, texto original, precios, jornales ni horas.
+  4. **"No registrado", nunca estimado:** se muestra así cuando falta un dato de la ficha del lote, un dato obligatorio de un evento o una medición clave que nunca se tomó. No se calcula ni se completa nada.
+  5. **Fuentes dentro de la imagen:** Fraunces y Source Sans 3 (licencia OFL) en `app/reports/fuentes/`, cargadas con `@font-face`. Una prueba revisa que el PDF solo traiga esas fuentes, incrustadas. Al Dockerfile solo se le agregan Pango y HarfBuzz, que WeasyPrint necesita.
+  6. **`GET /lotes/{id}/reporte.pdf`** (opcional `?desde=AAAA-MM-DD&hasta=AAAA-MM-DD`), con el token del panel (D-020): un lote de otra organización da 404. El panel lo descarga por `/lotes/<id>/reporte.pdf`, que lo pide desde el servidor de Next.js para que el token no llegue al navegador.
+  7. **WhatsApp: "REPORTE LOTE 3"** (prefijos en `comandos.reporte` de `config/conversacion.yaml`, igual que RESUMEN). La conversación responde enseguida "Ya te mando el reporte…" y, después del commit, la tarea `enviar_reporte` arma el PDF y lo manda como documento. Si el lote no tiene registros confirmados no se manda nada. Si el PDF falla, se le pide que lo vuelva a intentar. Solo se manda dentro de la ventana de 24 horas.
+  8. **OpenBSP:** `send_document` sube el archivo a `/storage/v1/object/media/organizations/<org>/attachments/<sha256>` y envía `content = {type: "file", kind: "document", file: {uri: "internal://media/…"}}`. Los headers de la subida no están documentados: se usan los de la descarga (`apikey` + `api-key`).
+- **Consecuencias:**
+  - **Antes de anunciar REPORTE a los productores:** probar el envío de un documento con un número real. Si OpenBSP rechaza la subida, el log del worker dice el código y el texto de la respuesta.
+  - **Falta lo que definió Brayan** sobre qué ve el comprador. Hoy sale lo marcado `publico` (por defecto todo menos ventas, jornales y recolectores). Ajustarlo es cambiar `publico` en `config/eventos.yaml`; el reporte y la página cambian juntos.
+  - Un lote con muchos registros puede pasar de dos páginas: la tabla sigue en la página siguiente sin cortar filas. Para un comprador conviene pedir el reporte por periodo (`desde`/`hasta`), que hoy solo se puede desde la URL.
+  - En producción `PUBLIC_WEB_URL` se arma con `WEB_DOMAIN`. Si cambia el dominio, los QR de reportes ya impresos dejan de servir.
+  - El PDF no se guarda: se genera en cada pedido (la tabla `reports` sigue sin usarse).

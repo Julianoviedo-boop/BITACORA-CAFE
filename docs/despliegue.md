@@ -6,7 +6,8 @@ Guía paso a paso para poner Bitácora de Café en un servidor Linux con Docker 
 
 ```
 Internet ──► 80/443 ──► Caddy ──┬──► api:8000  (api.su-dominio.com, incluye el webhook)
-                      (HTTPS)   └──► web:3000  (panel.su-dominio.com)
+                      (HTTPS)   └──► web:3000  (panel.su-dominio.com: panel con clave
+                                                y /l/<token>, la página pública del lote)
 
 Solo en 127.0.0.1 del servidor (se entra por túnel SSH):
    adminer :8081   flower :5555   dozzle :8888
@@ -18,6 +19,7 @@ Respaldo diario: pg_dump ──► disco del servidor (7 días) ──► rclone
 - En el servidor **no se compila nada**. GitHub Actions construye las imágenes en cada push a `main` y las sube a GHCR con el tag `sha-<commit>`. El servidor las descarga.
 - Del repositorio, el servidor solo usa `docker-compose.prod.yml`, `deploy/`, `scripts/` y `config/` (las reglas de negocio se montan desde ahí).
 - Los secretos viven solo en el `.env` del servidor.
+- El QR del reporte PDF lleva a `https://<WEB_DOMAIN>/l/<token>`: `PUBLIC_WEB_URL` se arma solo con `WEB_DOMAIN` (D-023). Si cambia el dominio, los QR ya impresos dejan de funcionar.
 
 ## 0. Lo que necesita antes de empezar
 
@@ -151,6 +153,8 @@ En el `.env` del servidor:
    - `APP_SECRET_KEY`
    - `POSTGRES_PASSWORD` **y la misma** dentro de `DATABASE_URL`
    - `OPENBSP_WEBHOOK_SECRET` y `OPENBSP_WEBHOOK_TOKEN` (sin ellos, en producción la API no arranca; D-018)
+   - `PANEL_API_TOKEN`, y `PANEL_USUARIO` y `PANEL_CLAVE` para entrar al panel (sin ellos el panel no abre; D-020).
+   - `PANEL_ORGANIZATION_ID` **déjelo vacío por ahora**: es el id de la organización, que todavía no existe. Se llena en el paso 6.
 4. `WHATSAPP_CHANNEL=openbsp` y las llaves de OpenBSP.
 5. `ANTHROPIC_API_KEY`. Ponga también un límite de gasto mensual en la consola de Anthropic.
 6. Deje `RESPALDO_REMOTO` para el paso 9.
@@ -185,11 +189,30 @@ Los paquetes de GHCR nacen **privados**. Dos opciones:
    docker compose logs caddy | grep -i certificate     # "certificate obtained successfully"
    ```
 
-   Abra `https://panel.su-dominio.com`: debe decir "Todo está funcionando".
-4. En OpenBSP, registre el webhook:
+4. Registre la organización con su número de WhatsApp. `--numero` es el *phone_number_id* de Meta (el `organization_address` de OpenBSP, no el teléfono); `--telefono` es el de un productor que va a escribir. En producción `scripts/` no está montado en la api, por eso va `-v`:
+
+   ```bash
+   docker compose run --rm -v "$PWD/scripts:/scripts:ro" api \
+     python /scripts/registrar_organizacion.py --numero <phone_number_id> \
+     --nombre "Asociación ..." --telefono +57300... --productor "Nombre del productor"
+   ```
+
+   La primera línea dice `Organización <id>: ...`. Ponga ese id en `PANEL_ORGANIZATION_ID` del `.env` y recree la api para que lo lea:
+
+   ```bash
+   nano .env
+   docker compose up -d --force-recreate api
+   ```
+
+5. Abra `https://panel.su-dominio.com` y entre con `PANEL_USUARIO` y `PANEL_CLAVE`:
+   - En el inicio debe decir "Todo está funcionando".
+   - En *Lotes* debe aparecer el lote `PRU-01`. Si dice "no está bien configurado", `PANEL_API_TOKEN` o `PANEL_ORGANIZATION_ID` están mal.
+   - En el lote, *Reporte en PDF* debe abrir el PDF. Escanee el QR con el celular: debe abrir la página pública **sin pedir clave**.
+6. En OpenBSP, registre el webhook:
    - URL: `https://api.su-dominio.com/webhooks/openbsp/<OPENBSP_WEBHOOK_SECRET>`
    - Token: el valor de `OPENBSP_WEBHOOK_TOKEN`.
-5. El primer audio tarda más: el worker descarga el modelo de Whisper (queda en el volumen `hf_cache`).
+7. Pruebe con el teléfono del productor registrado: acepte la autorización de datos, mande un audio ("hoy abonamos el lote PRU-01 con 4 bultos de 17-6-18"), responda SÍ y luego escriba `REPORTE LOTE PRU-01`. Debe llegar el PDF como documento. Es la primera prueba real del envío de documentos por OpenBSP (D-023): si no llega, vea *Problemas frecuentes*.
+8. El primer audio tarda más: el worker descarga el modelo de Whisper (queda en el volumen `hf_cache`).
 
 > `scripts/seed.py` carga datos **de ejemplo**: no lo corra en producción.
 
@@ -364,4 +387,7 @@ cat deploy/historial.log                  # fecha, tag y revisión de Alembic de
 | `docker compose pull` dice *denied* | Los paquetes de GHCR son privados y falta `docker login ghcr.io` (paso 5), o `GHCR_OWNER` no está en minúsculas. |
 | El respaldo no corre | `journalctl -u bitacora-respaldo -n 50`. Revise `RESPALDO_REMOTO` y `rclone ls bitacora-cifrado:postgres`. |
 | Se llena el disco | `docker system df` y `docker image prune -a` (borra imágenes que no estén en uso; las versiones viejas se vuelven a descargar si hace falta). Los logs de cada contenedor se rotan a 50 MB. |
+| El panel dice "no está bien configurado" | `PANEL_API_TOKEN` debe ser igual para la api y el panel (los dos lo leen del `.env`) y tener 32 caracteres o más; `PANEL_ORGANIZATION_ID` debe ser el id de la organización. Después de cambiarlos: `docker compose up -d --force-recreate api web`. |
+| REPORTE responde pero el PDF no llega | `docker compose logs worker \| grep -i reporte`. Si dice "OpenBSP rechazó la subida", OpenBSP no acepta los headers con los que se sube el archivo (no están documentados; D-023): revise el código y el texto de la respuesta. Mientras tanto, el PDF se puede bajar del panel. |
+| El QR abre otra dirección | `PUBLIC_WEB_URL` se arma con `WEB_DOMAIN`: revise ese valor en el `.env` y recree api y worker. |
 | Los audios tardan mucho | Un worker con `--concurrency=2` usa dos núcleos. En un VPS con más núcleos: `docker compose up -d --scale worker=2`. |

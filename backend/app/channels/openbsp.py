@@ -30,6 +30,16 @@ Archivos entrantes
 Salida
     POST {base}/rest/v1/messages con headers `apikey` y `api-key` (documentado).
 
+Documentos (sin verificar con un envío real)
+    MIGRATING_FROM_TWILIO.md documenta subir el archivo y referenciarlo:
+      POST {base}/storage/v1/object/media/organizations/<org_id>/attachments/<hash>
+    y luego enviar content = {type: "file", kind: "document", file: {mime_type,
+    uri: "internal://media/organizations/<org_id>/attachments/<hash>", name, size},
+    text: <pie>}. Los headers de la subida NO están documentados: se usan los mismos
+    de la descarga (apikey + api-key), más Content-Type y x-upsert. <hash> es el
+    SHA-256 del archivo (la documentación no dice cómo se arma). Probarlo con un
+    envío real antes de anunciar el comando REPORTE a los productores (D-023).
+
 Plantillas (sin verificar con un envío real)
     MIGRATING_FROM_TWILIO.md trae un ejemplo con `data.parameters` en la raíz, pero
     los tipos del código (_shared/types/whatsapp_template_types.ts) piden
@@ -39,6 +49,7 @@ Plantillas (sin verificar con un envío real)
     probarla con un número real (docs/decisiones.md, D-017).
 """
 
+import hashlib
 import logging
 from collections.abc import Sequence
 from typing import Any
@@ -211,6 +222,36 @@ class OpenBSPChannel(Channel):
             }]
         self._insert_message(channel_address, to_phone,
                              {"version": "1", "type": "data", "kind": "template", "data": data})
+
+    def send_document(
+        self, channel_address: str, to_phone: str, content: bytes, filename: str,
+        mime_type: str, caption: str | None = None,
+    ) -> None:
+        if len(content) > MAX_MEDIA_BYTES:
+            raise ChannelError("El documento es demasiado grande para enviarlo")
+        llave = (f"organizations/{self._organization_id}/attachments/"
+                 f"{hashlib.sha256(content).hexdigest()}")
+        try:
+            resp = self._client.post(
+                f"{self._base}/storage/v1/object/media/{quote(llave, safe='/')}",
+                content=content,
+                headers={**self._headers, "Content-Type": mime_type, "x-upsert": "true"},
+            )
+        except httpx.HTTPError as exc:
+            raise ChannelTemporaryError(f"No se pudo subir el documento a OpenBSP: {exc}") from exc
+        if resp.status_code >= 500:
+            raise ChannelTemporaryError(f"OpenBSP respondió {resp.status_code} al subir")
+        if resp.status_code >= 400:
+            raise ChannelError(
+                f"OpenBSP rechazó la subida ({resp.status_code}): {resp.text[:300]}")
+        archivo: dict[str, Any] = {
+            "version": "1", "type": "file", "kind": "document",
+            "file": {"mime_type": mime_type, "uri": f"{INTERNAL_MEDIA_PREFIX}{llave}",
+                     "name": filename, "size": len(content)},
+        }
+        if caption:
+            archivo["text"] = caption
+        self._insert_message(channel_address, to_phone, archivo)
 
     def _insert_message(self, channel_address: str, to_phone: str,
                         content: dict[str, Any]) -> None:

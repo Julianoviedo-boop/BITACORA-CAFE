@@ -12,8 +12,15 @@ consentimiento y, si es audio, de la transcripción):
 - Correcciones: máximo `max_rondas` después del resumen; luego se le pide hablar
   con el asesor (los eventos quedan "pendiente" para que el asesor los revise).
   Lo mismo si se le repite `max_rondas` veces la misma pregunta.
-- Comandos en cualquier momento: "mis lotes", "resumen lote 3", "ayuda". No
-  cambian el estado; si había una pregunta abierta, se le recuerda.
+- Comandos en cualquier momento: "mis lotes", "resumen lote 3", "reporte lote 3",
+  "ayuda". No cambian el estado; si había una pregunta abierta, se le recuerda.
+  "reporte lote 3" responde enseguida y el PDF lo arma y lo manda otra tarea
+  después del commit (`despachar_reporte`, D-023).
+- Consultas: "¿cómo va el lote 3?", "¿qué se ha hecho en La Esperanza?" dan el
+  mismo resumen que "resumen lote 3", sin llamar a Claude y sin crear eventos. Solo
+  cuentan como consulta si lo que sigue a la pregunta es un lote (dice "lote", trae
+  un número o es el nombre de un lote); si no, o si el mensaje es largo ("¿cómo
+  está el lote 3? hoy le echamos abono"), se trata como un registro.
 - Regla de oro 2: `events.confirm` solo se llama en `_ejecutar` con la acción
   "confirmar", que solo sale de una respuesta de la lista `respuestas.confirmar`
   estando en estado "confirmando" (el resumen ya se le mostró).
@@ -66,6 +73,8 @@ logger = logging.getLogger(__name__)
 UnitOfWork = Callable[[], AbstractContextManager[Repositories]]
 # Recibe los ids de las alertas nuevas, después del commit (las encola para enviarlas).
 DespacharAlertas = Callable[[list[uuid.UUID]], None]
+# Recibe (lot_id, message_id): arma el reporte del lote y se lo manda a quien lo pidió.
+DespacharReporte = Callable[[uuid.UUID, uuid.UUID], None]
 
 # Veces que se vuelve a empezar si la conversación cambió mientras se hablaba con Claude.
 MAX_CONFLICTOS = 3
@@ -92,8 +101,9 @@ CLAVES_TEXTOS = (
     "confirmar_uno", "confirmar_varios", "pregunta_dato", "ofrecer_lote", "lote_creado",
     "confirmado", "cancelado", "nada_pendiente", "que_cambiar", "no_entendi",
     "no_entendi_correccion", "asesor", "error", "solo_audio_texto", "recordatorio", "ayuda",
-    "mis_lotes", "sin_lotes", "resumen", "resumen_vacio", "resumen_sin_lote",
-    "lote_no_encontrado",
+    "mis_lotes", "sin_lotes", "resumen", "resumen_vacio", "resumen_sin_lote", "resumen_total",
+    "lote_no_encontrado", "reporte_enviando", "reporte_vacio", "reporte_sin_lote",
+    "reporte_listo", "reporte_error",
 )
 
 
@@ -107,6 +117,13 @@ class TextosConversacion:
     ayuda: frozenset[str]
     # Normalizados, del más largo al más corto.
     prefijos_resumen: tuple[str, ...]
+    # "reporte lote 3": del más largo al más corto. Vacío = no hay comando de reporte.
+    prefijos_reporte: tuple[str, ...]
+    # Preguntas por un lote ("como va", "que se ha hecho en"), del más largo al más corto.
+    prefijos_consulta: tuple[str, ...]
+    # Lo que se quita al inicio ("hola") y al final ("por favor") antes de buscar un comando.
+    saludos: tuple[str, ...]
+    cortesias: tuple[str, ...]
     preguntas: dict[str, str]
     # unidad -> (singular, plural)
     unidades: dict[str, tuple[str, str]]
@@ -127,6 +144,14 @@ def _lista(path: Path, donde: str, valor: Any) -> frozenset[str]:
         # YAML lee  no / si / yes  sin comillas como booleanos.
         raise ValueError(f"{path}: {donde} debe tener textos entre comillas; llegó {raras}")
     return frozenset(normalizar(v) for v in valor) - {""}
+
+
+def _por_largo(valores: frozenset[str]) -> tuple[str, ...]:
+    return tuple(sorted(valores, key=len, reverse=True))
+
+
+def _lista_opcional(path: Path, donde: str, valor: Any) -> frozenset[str]:
+    return frozenset() if valor is None else _lista(path, donde, valor)
 
 
 def cargar_textos(config_dir: str | Path) -> TextosConversacion:
@@ -153,6 +178,10 @@ def cargar_textos(config_dir: str | Path) -> TextosConversacion:
                 raise ValueError(f"{path}: «{v}» está en {vistos[v]} y en {nombre}")
             vistos[v] = nombre
     prefijos = _lista(path, "comandos.resumen", comandos.get("resumen"))
+    reporte = _lista_opcional(path, "comandos.reporte", comandos.get("reporte"))
+    consulta = _lista_opcional(path, "comandos.consulta", comandos.get("consulta"))
+    saludos = _lista_opcional(path, "comandos.saludos", comandos.get("saludos"))
+    cortesias = _lista_opcional(path, "comandos.cortesias", comandos.get("cortesias"))
 
     preguntas = data.get("preguntas") or {}
     faltan = [k for k in ("lote", "fecha", "generica") if not str(preguntas.get(k) or "").strip()]
@@ -180,7 +209,11 @@ def cargar_textos(config_dir: str | Path) -> TextosConversacion:
         cancelar=grupos["respuestas.cancelar"],
         mis_lotes=grupos["comandos.mis_lotes"],
         ayuda=grupos["comandos.ayuda"],
-        prefijos_resumen=tuple(sorted(prefijos, key=len, reverse=True)),
+        prefijos_resumen=_por_largo(prefijos),
+        prefijos_reporte=_por_largo(reporte),
+        prefijos_consulta=_por_largo(consulta),
+        saludos=_por_largo(saludos),
+        cortesias=_por_largo(cortesias),
         preguntas={k: str(preguntas[k]).strip() for k in ("lote", "fecha", "generica")},
         unidades=unidades,
         textos={k: str(textos[k]) for k in CLAVES_TEXTOS},
@@ -332,29 +365,81 @@ def nombre_lote_nuevo(mencion: str) -> str:
 # Qué quiere el productor (sin Claude)
 # ---------------------------------------------------------------------------
 
-Intencion = Literal["vacio", "mis_lotes", "ayuda", "resumen", "confirmar", "negar",
-                    "cancelar", "texto"]
-Accion = Literal["vacio", "mis_lotes", "ayuda", "resumen", "nada_pendiente", "confirmar",
+Intencion = Literal["vacio", "mis_lotes", "ayuda", "resumen", "reporte", "confirmar",
+                    "negar", "cancelar", "texto"]
+Accion = Literal["vacio", "mis_lotes", "ayuda", "resumen", "reporte", "nada_pendiente",
+                 "confirmar",
                  "que_cambiar", "cancelar", "crear_lote", "rechazar_lote", "asesor",
                  "extraer", "revisar"]
 
 
-def clasificar(texto: str | None, textos: TextosConversacion) -> tuple[Intencion, str | None]:
+def _sin_relleno(t: str, textos: TextosConversacion) -> str:
+    """Quita un saludo al inicio y cortesías al final: "hola como va el 3 por favor"
+    -> "como va el 3". Si no queda nada, deja el texto como estaba ("hola")."""
+    limpio = t
+    for saludo in textos.saludos:
+        if limpio.startswith(saludo + " "):
+            limpio = limpio[len(saludo) + 1:]
+            break
+    quitado = True
+    while quitado:
+        quitado = False
+        for cortesia in textos.cortesias:
+            if limpio.endswith(" " + cortesia):
+                limpio, quitado = limpio[:-len(cortesia) - 1], True
+                break
+    return limpio or t
+
+
+def _es_lote(resto: str, lotes: Sequence[LoteContexto]) -> bool:
+    """¿Lo que sigue a "como va" nombra un lote? Dice "lote", trae un número o es
+    el nombre o el código de un lote ("la esperanza")."""
+    if "lote" in resto.split() or any(c.isdigit() for c in resto):
+        return True
+    conocidos: set[str] = set()
+    for lote in lotes:
+        conocidos |= _variantes(lote.nombre) | _variantes(lote.codigo)
+    return bool(_variantes(resto) & conocidos)
+
+
+def _consulta(t: str, textos: TextosConversacion,
+              lotes: Sequence[LoteContexto]) -> str | None:
+    """El lote por el que pregunta ("como va el lote 3" -> "3"), o None si no es
+    una consulta."""
+    for prefijo in textos.prefijos_consulta:
+        if not t.startswith(prefijo + " "):
+            continue
+        resto = t[len(prefijo) + 1:]
+        if len(resto.split()) > RESUMEN_MAX_PALABRAS_LOTE or not _es_lote(resto, lotes):
+            return None
+        return _ARTICULOS.sub("", resto).strip() or resto
+    return None
+
+
+def clasificar(texto: str | None, textos: TextosConversacion,
+               lotes: Sequence[LoteContexto] = ()) -> tuple[Intencion, str | None]:
+    """Qué quiere el productor, sin Claude. `lotes` sirve para reconocer una consulta
+    por el nombre del lote ("¿cómo va La Esperanza?")."""
     t = normalizar(texto or "")
     if not t:
         return "vacio", None
+    t = _sin_relleno(t, textos)
     if t in textos.mis_lotes:
         return "mis_lotes", None
     if t in textos.ayuda:
         return "ayuda", None
-    for prefijo in textos.prefijos_resumen:
-        if t == prefijo:
-            return "resumen", None
-        if t.startswith(prefijo + " "):
-            resto = t[len(prefijo) + 1:]
-            if len(resto.split()) <= RESUMEN_MAX_PALABRAS_LOTE:
-                return "resumen", resto
-            break  # texto largo: es un reporte ("resumen de la semana: ...")
+    for comando, prefijos in (("reporte", textos.prefijos_reporte),
+                              ("resumen", textos.prefijos_resumen)):
+        for prefijo in prefijos:
+            if t == prefijo:
+                return comando, None
+            if t.startswith(prefijo + " "):
+                resto = t[len(prefijo) + 1:]
+                if len(resto.split()) <= RESUMEN_MAX_PALABRAS_LOTE:
+                    return comando, resto
+                break  # texto largo: es un registro ("resumen de la semana: ...")
+    if (referencia := _consulta(t, textos, lotes)) is not None:
+        return "resumen", referencia
     if t in textos.cancelar:
         return "cancelar", None
     if t in textos.confirmar:
@@ -366,7 +451,7 @@ def clasificar(texto: str | None, textos: TextosConversacion) -> tuple[Intencion
 
 def planear(estado: str, rondas: int, intencion: Intencion,
             textos: TextosConversacion) -> Accion:
-    if intencion in ("vacio", "mis_lotes", "ayuda", "resumen"):
+    if intencion in ("vacio", "mis_lotes", "ayuda", "resumen", "reporte"):
         return intencion
     if estado == "libre":
         return "nada_pendiente" if intencion in ("confirmar", "negar", "cancelar") else "extraer"
@@ -461,6 +546,8 @@ class _Ctx:
     reglas_alertas: alertas.ReglasAlertas | None = None
     # Alertas abiertas por los eventos que se confirmaron en este mensaje.
     alertas_nuevas: list[uuid.UUID] = field(default_factory=list)
+    # Lote del que pidió el reporte en PDF ("reporte lote 3").
+    reporte_lote: uuid.UUID | None = None
 
     @property
     def org_id(self) -> uuid.UUID:
@@ -487,6 +574,7 @@ def atender(
     ahora: dt.datetime | None = None,
     reglas_alertas: alertas.ReglasAlertas | None = None,
     despachar_alertas: DespacharAlertas | None = None,
+    despachar_reporte: DespacharReporte | None = None,
 ) -> str:
     """Atiende un mensaje ya listo (texto con consentimiento, o audio transcrito).
 
@@ -494,7 +582,8 @@ def atender(
     Lanza ReintentarError si Claude falló de forma temporal.
 
     Si al confirmar se abren alertas, se le pasan sus ids a `despachar_alertas`
-    después del commit. Sin `reglas_alertas` se usan las de config/alertas.yaml.
+    después del commit. Si pidió un reporte, `despachar_reporte` recibe el lote y el
+    mensaje, también después del commit. Sin `reglas_alertas` se usan las de config/alertas.yaml.
     """
     if reglas_alertas is None:
         reglas_alertas = alertas.get_reglas()
@@ -504,7 +593,7 @@ def atender(
         if foto is None:
             return "omitido"
 
-        intencion, referencia = clasificar(foto.texto, textos)
+        intencion, referencia = clasificar(foto.texto, textos, foto.lotes)
         accion = planear(foto.estado, foto.rondas, intencion, textos)
         try:
             propuesta = _interpretar(accion, foto, interprete)
@@ -516,12 +605,16 @@ def atender(
                           f"extraccion: {exc}", ahora=ahora)
 
         alertas_nuevas: list[uuid.UUID] = []
+        reportes: list[uuid.UUID] = []
         with uow() as repos:
             resultado = _aplicar(repos, channel, interprete.catalogo, textos, organization_id,
                                  message_id, foto, accion, referencia, propuesta,
-                                 ahora or dt.datetime.now(dt.UTC), reglas_alertas, alertas_nuevas)
+                                 ahora or dt.datetime.now(dt.UTC), reglas_alertas, alertas_nuevas,
+                                 reportes)
         if alertas_nuevas and despachar_alertas is not None and resultado != "conflicto":
             despachar_alertas(alertas_nuevas)
+        if reportes and despachar_reporte is not None and resultado != "conflicto":
+            despachar_reporte(reportes[0], message_id)
         if resultado != "conflicto":
             logger.info("conversacion msg=%s estado=%s accion=%s resultado=%s", message_id,
                         foto.estado, accion, resultado)
@@ -564,7 +657,8 @@ def _aplicar(repos: Repositories, channel: Channel, catalogo: CatalogoEventos,
              accion: Accion, referencia: str | None,
              propuesta: list[EventoPropuesto] | None, ahora: dt.datetime,
              reglas_alertas: alertas.ReglasAlertas | None = None,
-             alertas_nuevas: list[uuid.UUID] | None = None) -> str:
+             alertas_nuevas: list[uuid.UUID] | None = None,
+             reportes: list[uuid.UUID] | None = None) -> str:
     conv = repos.conversations.get_by_producer(org_id, foto.producer_id, for_update=True)
     if conv is None or conv.version != foto.version:
         return "conflicto"
@@ -604,6 +698,9 @@ def _aplicar(repos: Repositories, channel: Channel, catalogo: CatalogoEventos,
     repos.conversations.update(org_id, conv.id, **cambios)
     if enviar:
         channel.send_text(org.whatsapp_address, producer.phone, texto)
+        # El PDF solo se arma si se le pudo avisar (dentro de la ventana de 24 horas).
+        if reportes is not None and ctx.reporte_lote is not None:
+            reportes.append(ctx.reporte_lote)
     return resultado
 
 
@@ -662,7 +759,7 @@ def _ejecutar(ctx: _Ctx, estado: _Estado, accion: Accion, referencia: str | None
     """Aplica la acción sobre `estado`. Devuelve (respuesta, resultado)."""
     t = ctx.textos.t
 
-    if accion in ("vacio", "mis_lotes", "ayuda", "resumen"):
+    if accion in ("vacio", "mis_lotes", "ayuda", "resumen", "reporte"):
         texto = _comando(ctx, accion, referencia)
         if estado.estado != "libre" and estado.ultimo_texto:
             recordatorio = t("recordatorio", pregunta=estado.ultimo_texto)
@@ -937,13 +1034,18 @@ def _comando(ctx: _Ctx, accion: Accion, referencia: str | None) -> str | None:
             return t("sin_lotes")
         return t("mis_lotes", lotes="\n".join(f"• {l.name} ({l.code})" for l in lotes))
 
-    # resumen
+    # resumen o reporte
     if not referencia:
-        return t("resumen_sin_lote")
+        return t("reporte_sin_lote" if accion == "reporte" else "resumen_sin_lote")
     lote = buscar_lote(referencia, lotes)
     if lote is None:
         return t("lote_no_encontrado", lote=referencia)
     eventos = ctx.repos.events.list_by_lot(ctx.org_id, lote.id, status="confirmado")
+    if accion == "reporte":
+        if not eventos:
+            return t("reporte_vacio", lote=lote.name)
+        ctx.reporte_lote = lote.id
+        return t("reporte_enviando", lote=f"{lote.name} ({lote.code})")
     if not eventos:
         return t("resumen_vacio", lote=lote.name)
     lineas = []
@@ -953,7 +1055,10 @@ def _comando(ctx: _Ctx, accion: Accion, referencia: str | None) -> str | None:
         lineas.append("• " + linea_evento(ev.event_type, None, local.date(), hora,
                                           _datos_desde_json(ev.data), ctx.hoy, ctx.textos,
                                           ctx.catalogo))
-    return t("resumen", lote=f"{lote.name} ({lote.code})", eventos="\n".join(lineas))
+    texto = t("resumen", lote=f"{lote.name} ({lote.code})", eventos="\n".join(lineas))
+    if len(eventos) > RESUMEN_MAX_EVENTOS:
+        texto += "\n" + t("resumen_total", total=len(eventos))
+    return texto
 
 
 def _datos_desde_json(data: dict[str, Any] | None) -> dict[str, DatoMedido | None]:

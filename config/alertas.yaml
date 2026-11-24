@@ -32,6 +32,7 @@
 # ---------------------------------------------------------------------------
 # Nadie tiene que marcar la etapa a mano: sale de los eventos confirmados.
 #
+#   nombre:      cómo se llama la etapa en el panel (opcional).
 #   empieza_con: eventos que ponen al lote en esta etapa.
 #   termina_con: eventos que sacan al lote de cualquier etapa (queda sin etapa).
 #
@@ -48,12 +49,14 @@
 
 etapas:
   fermentacion:
+    nombre: Fermentación
     empieza_con:
       - evento: beneficio
         campo: etapa
         dice: ferment
 
   secado:
+    nombre: Secado
     empieza_con:
       - evento: beneficio
         campo: etapa

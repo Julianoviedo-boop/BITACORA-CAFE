@@ -5,6 +5,9 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from app.api.health import router as health_router
+from app.api.panel import router as panel_router
+from app.api.publico import router as publico_router
+from app.api.reportes import router as reportes_router
 from app.api import webhooks
 from app.api.webhooks import OcultarSecretoWebhook
 from app.api.webhooks import router as webhooks_router
@@ -31,3 +34,6 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
 app = FastAPI(title="Bitácora de Café", lifespan=lifespan)
 app.include_router(health_router)
 app.include_router(webhooks_router)
+app.include_router(panel_router)
+app.include_router(publico_router)
+app.include_router(reportes_router)

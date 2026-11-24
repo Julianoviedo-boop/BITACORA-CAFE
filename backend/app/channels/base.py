@@ -77,3 +77,11 @@ class Channel(ABC):
 
         `params` llenan, en orden, las variables {{1}}, {{2}}... del cuerpo.
         """
+
+    @abstractmethod
+    def send_document(
+        self, channel_address: str, to_phone: str, content: bytes, filename: str,
+        mime_type: str, caption: str | None = None,
+    ) -> None:
+        """Envía un archivo como documento (p. ej. el reporte en PDF), con un texto
+        opcional debajo. Solo dentro de la ventana de 24 horas."""
