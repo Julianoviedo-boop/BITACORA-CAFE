@@ -100,6 +100,29 @@ def test_archivo_temporal_ya_borrado_no_falla():
         p.unlink()
 
 
+@pytest.mark.parametrize("media_ref,mime,esperado", [
+    ("x", "audio/ogg", ".ogg"),  # no ".oga", aunque el sistema lo diga
+    ("x", "audio/ogg; codecs=opus", ".ogg"),
+    ("x", "Audio/OGG", ".ogg"),
+    ("x", "audio/mp4", ".m4a"),
+    ("x", "audio/mpeg", ".mp3"),
+    ("x", "audio/amr", ".amr"),
+    ("x", "audio/aac", ".aac"),
+    ("x", "audio/opus", ".opus"),
+    ("fixture://nota.wav", None, ".wav"),
+    ("sin-extension", None, ".audio"),
+    ("nota.ogg", "tipo/desconocido-xyz", ".ogg"),
+])
+def test_sufijo_del_temporal_no_depende_del_sistema(media_ref, mime, esperado):
+    assert transcripcion._sufijo(media_ref, mime) == esperado
+
+
+def test_sufijo_ignora_lo_que_diga_mimetypes(monkeypatch):
+    # Simula el runner de CI, donde /etc/mime.types pone "oga" antes que "ogg".
+    monkeypatch.setattr(transcripcion.mimetypes, "guess_extension", lambda _t: ".oga")
+    assert transcripcion._sufijo("x", "audio/ogg") == ".ogg"
+
+
 # ---------------------------------------------------------------------------
 # Caso de uso (con base de datos)
 # ---------------------------------------------------------------------------

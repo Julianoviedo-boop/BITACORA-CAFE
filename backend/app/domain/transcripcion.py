@@ -172,9 +172,23 @@ def registrar_fallo(
     return Resultado("fallido", aviso=reglas.aviso(clave), detalle=clave)
 
 
+# Extensiones fijas para los audios que manda WhatsApp. mimetypes depende de la
+# base de tipos del sistema (/etc/mime.types) y, por ejemplo, para audio/ogg
+# devuelve ".oga" en unos equipos y ".ogg" en otros.
+_EXTENSIONES_AUDIO: dict[str, str] = {
+    "audio/ogg": ".ogg",
+    "audio/opus": ".opus",
+    "audio/mp4": ".m4a",
+    "audio/mpeg": ".mp3",
+    "audio/amr": ".amr",
+    "audio/aac": ".aac",
+}
+
+
 def _sufijo(media_ref: str, mime_type: str | None) -> str:
     if mime_type:
-        ext = mimetypes.guess_extension(mime_type.split(";")[0].strip())
+        tipo = mime_type.split(";")[0].strip().lower()
+        ext = _EXTENSIONES_AUDIO.get(tipo) or mimetypes.guess_extension(tipo)
         if ext:
             return ext
     return Path(media_ref).suffix[:10] or ".audio"
