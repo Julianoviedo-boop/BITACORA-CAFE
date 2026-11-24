@@ -1,28 +1,22 @@
-import type { Metadata } from "next";
-import Link from "next/link";
+import type { Metadata, Viewport } from "next";
+import { Fraunces, Source_Sans_3 } from "next/font/google";
 import "./globals.css";
 
+// Títulos con serifa (de libreta de campo) y texto muy legible en celular.
+const titulos = Fraunces({ subsets: ["latin"], variable: "--font-titulos", display: "swap" });
+const texto = Source_Sans_3({ subsets: ["latin"], variable: "--font-texto", display: "swap" });
+
 export const metadata: Metadata = {
-  title: "Bitácora de Café",
+  title: { default: "Bitácora de Café", template: "%s · Bitácora de Café" },
   description: "Historia y trazabilidad de sus lotes de café",
 };
 
+export const viewport: Viewport = { themeColor: "#2f5b43" };
+
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="es-CO">
-      <body className="min-h-screen bg-stone-50 text-stone-900 antialiased">
-        <header className="border-b border-stone-200 bg-white">
-          <nav className="mx-auto flex max-w-3xl items-center gap-6 px-4 py-3 sm:px-8">
-            <Link href="/" className="font-bold text-amber-900">
-              Bitácora de Café
-            </Link>
-            <Link href="/lotes" className="text-stone-700 hover:text-amber-800">
-              Lotes
-            </Link>
-          </nav>
-        </header>
-        {children}
-      </body>
+    <html lang="es-CO" className={`${titulos.variable} ${texto.variable}`}>
+      <body className="min-h-screen antialiased">{children}</body>
     </html>
   );
 }

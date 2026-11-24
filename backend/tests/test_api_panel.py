@@ -1,4 +1,4 @@
-"""GET /panel/lotes y /panel/lotes/{id}: autenticación y aislamiento por organización."""
+"""GET /panel/lotes, /panel/lotes/{id} y /panel/alertas: autenticación y aislamiento."""
 
 import uuid
 from collections.abc import Iterator
@@ -50,6 +50,7 @@ def _auth(token: str = TOKEN) -> dict[str, str]:
 
 def test_sin_token_no_autoriza(client):
     assert client.get("/panel/lotes").status_code == 401
+    assert client.get("/panel/alertas").status_code == 401
 
 
 def test_token_incorrecto_no_autoriza(client):
@@ -94,8 +95,12 @@ def datos(db_session: Session):
                           occurred_at=datetime(2026, 11, 2, 14, 30, tzinfo=UTC),
                           data={"temperatura": {"valor": 23, "unidad": "grado_celsius"}})
     repos.events.confirm(ORG_ID, ev.id)
+    repos.alerts.open_if_absent(ORG_ID, lot_id=lote.id, rule_code="tiempo:fermentacion:volteo",
+                                message="Sin volteo", due_at=datetime(2026, 11, 3, tzinfo=UTC))
     finca_otra = repos.farms.add(otra, name="Ajena")
     lote_otro = repos.lots.add(otra, farm_id=finca_otra.id, name="Ajeno", code="AJ-01")
+    repos.alerts.open_if_absent(otra, lot_id=lote_otro.id, rule_code="tiempo:fermentacion:volteo",
+                                message="Ajena", due_at=datetime(2026, 11, 3, tzinfo=UTC))
     db_session.flush()
     return {"lote": lote.id, "lote_otro": lote_otro.id}
 
@@ -110,6 +115,9 @@ def test_lista_solo_lotes_de_la_organizacion_del_token(db_client, datos):
     assert lotes[0]["codigo"] == "ESP-01"
     assert lotes[0]["eventos"] == 1
     assert lotes[0]["ultimo_evento"] == "2026-11-02"
+    assert lotes[0]["ultima_actividad"] == "Volteo"
+    assert lotes[0]["alertas_abiertas"] == 1
+    assert "public_token" not in lotes[0]
 
 
 @pytest.mark.db
@@ -124,6 +132,11 @@ def test_historia_del_lote(db_client, datos):
     assert evento["fecha_texto"] == "lunes 2 de noviembre de 2026"
     assert evento["hora"] == "9:30 a.m."
     assert evento["datos"] == [{"etiqueta": "Temperatura", "valor": "23 °C"}]
+    assert evento["estado"] == "confirmado"
+    [serie] = body["mediciones"]
+    assert (serie["etiqueta"], serie["unidad"]) == ("Temperatura", "°C")
+    assert [p["valor"] for p in serie["puntos"]] == [23.0]
+    assert [a["mensaje"] for a in body["alertas"]] == ["Sin volteo"]
 
 
 @pytest.mark.db
@@ -131,3 +144,15 @@ def test_lote_de_otra_organizacion_da_404(db_client, datos):
     resp = db_client.get(f"/panel/lotes/{datos['lote_otro']}", headers=_auth())
     assert resp.status_code == 404
     assert db_client.get(f"/panel/lotes/{uuid.uuid4()}", headers=_auth()).status_code == 404
+
+
+@pytest.mark.db
+def test_alertas_solo_de_la_organizacion_del_token(db_client, datos):
+    resp = db_client.get("/panel/alertas", headers=_auth())
+
+    assert resp.status_code == 200
+    [alerta] = resp.json()["alertas"]
+    assert alerta["mensaje"] == "Sin volteo"
+    assert alerta["lote_codigo"] == "ESP-01"
+    assert alerta["clase"] == "tiempo"
+    assert alerta["estado"] == "pendiente"

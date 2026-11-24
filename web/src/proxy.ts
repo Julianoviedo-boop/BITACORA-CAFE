@@ -55,6 +55,7 @@ export function proxy(request: NextRequest) {
 }
 
 export const config = {
-  // Todo menos los archivos estáticos que arma Next.js.
-  matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
+  // Todo menos los archivos estáticos que arma Next.js y la página pública del
+  // lote (/l/<token>), que abre un comprador sin clave (D-022).
+  matcher: ["/((?!_next/static|_next/image|favicon.ico|l/).*)"],
 };

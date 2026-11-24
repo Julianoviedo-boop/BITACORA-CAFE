@@ -14,6 +14,8 @@
 #       nombre: texto para el productor ("Abonada")
 #       descripcion: qué cuenta como este evento (lo lee Claude)
 #       requiere_lote: si el evento siempre es de un lote (por defecto true)
+#       publico: si sale en la página pública del lote, la que ve un comprador
+#                (por defecto true). false para lo que es solo de la finca.
 #       campos:
 #         <campo>:
 #           tipo: numero | texto
@@ -22,6 +24,11 @@
 #           unidades: [..]              (solo numero; claves de "unidades" abajo)
 #           descripcion: qué es y cómo lo dice el productor
 #           pregunta: lo que se le pregunta al productor si falta (obligatorios)
+#           grafica: true si es una medición que el panel dibuja en el tiempo
+#                    (solo numero; por defecto false)
+#           publico: false si el dato no debe salir en la página pública del
+#                    lote (costos, trabajadores...). Por defecto true. El texto
+#                    original del caficultor nunca sale en la página pública.
 #
 # Un mismo nombre de campo puede estar en varios tipos, pero con el mismo "tipo".
 # La fecha y el lote son comunes a todos los eventos y no se declaran aquí.
@@ -82,6 +89,7 @@ tipos:
         etiqueta: Jornales
         unidades: [jornal, persona]
         descripcion: Jornales o trabajadores que hicieron la labor.
+        publico: false
 
   fumigacion:
     nombre: Fumigación
@@ -119,6 +127,7 @@ tipos:
         etiqueta: Jornales
         unidades: [jornal, persona]
         descripcion: Jornales o trabajadores que hicieron la labor.
+        publico: false
 
   desyerba:
     nombre: Desyerba
@@ -136,6 +145,7 @@ tipos:
         etiqueta: Jornales
         unidades: [jornal, persona]
         descripcion: Jornales o trabajadores que hicieron la labor.
+        publico: false
 
   recoleccion:
     nombre: Recolección
@@ -153,6 +163,7 @@ tipos:
         etiqueta: Recolectores
         unidades: [persona]
         descripcion: Número de recolectores.
+        publico: false
       pase:
         tipo: texto
         etiqueta: Pase
@@ -180,6 +191,7 @@ tipos:
         etiqueta: Horas de fermentación
         unidades: [hora]
         descripcion: Horas de fermentación, si las dijo.
+        grafica: true
 
   secado:
     nombre: Secado
@@ -201,11 +213,14 @@ tipos:
         etiqueta: Humedad
         unidades: [porcentaje]
         descripcion: Humedad final del grano, si la midió.
+        grafica: true
 
   venta:
     nombre: Venta
     descripcion: Venta de café a una cooperativa, comprador o trilladora.
     requiere_lote: false
+    # Precios y compradores son del negocio de la finca, no de la historia del lote.
+    publico: false
     campos:
       cantidad:
         tipo: numero
@@ -246,9 +261,10 @@ tipos:
         descripcion: Cuánto o dónde (p. ej. "varias matas en la parte de abajo").
       porcentaje:
         tipo: numero
-        etiqueta: Porcentaje
+        etiqueta: Porcentaje afectado
         unidades: [porcentaje]
         descripcion: Porcentaje de infestación, solo si lo midió.
+        grafica: true
 
   # --- PROVISIONALES (2026-11-13) -------------------------------------------
   # Agregados para que funcionen las alertas provisionales de config/alertas.yaml.
@@ -266,6 +282,7 @@ tipos:
         etiqueta: Temperatura
         unidades: [grado_celsius]
         descripcion: Temperatura de la masa, solo si la midió.
+        grafica: true
 
   medicion_fermentacion:
     nombre: Medición de la fermentación
@@ -279,6 +296,7 @@ tipos:
         obligatorio: true
         unidades: [grado_celsius]
         descripcion: Temperatura de la masa en fermentación.
+        grafica: true
         pregunta: ¿A cuántos grados estaba el café? Por ejemplo, 25 grados.
 
   medicion_humedad:
@@ -293,4 +311,5 @@ tipos:
         obligatorio: true
         unidades: [porcentaje]
         descripcion: Humedad del grano medida.
+        grafica: true
         pregunta: ¿Cuánta humedad marcó el café? Por ejemplo, 11,5 por ciento.

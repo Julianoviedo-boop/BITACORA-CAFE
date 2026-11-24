@@ -1,4 +1,8 @@
+import { Bell, CircleCheck, CircleX, LayoutGrid } from "lucide-react";
 import Link from "next/link";
+
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 export const dynamic = "force-dynamic";
 
@@ -15,37 +19,61 @@ async function consultarSalud(): Promise<Salud | null> {
   }
 }
 
+function Chequeo({ nombre, bien }: { nombre: string; bien: boolean }) {
+  const Icono = bien ? CircleCheck : CircleX;
+  return (
+    <li className="flex items-center gap-2">
+      <Icono aria-hidden className={bien ? "size-4 text-primary" : "size-4 text-destructive"} />
+      {nombre}: {bien ? "bien" : "con fallas"}
+    </li>
+  );
+}
+
 export default async function Inicio() {
   const salud = await consultarSalud();
   const todoBien = salud?.status === "ok";
 
   return (
-    <main className="mx-auto max-w-3xl p-4 sm:p-8">
-      <h1 className="text-3xl font-bold">Bitácora de Café</h1>
-      <p className="mt-2 text-stone-600">Aquí va a ver la historia de cada lote.</p>
-      <Link
-        href="/lotes"
-        className="mt-6 inline-block rounded-lg bg-amber-800 px-4 py-2 font-medium text-white hover:bg-amber-900"
-      >
-        Ver los lotes
-      </Link>
+    <main className="mx-auto max-w-5xl px-4 py-8 sm:px-6">
+      <h1 className="text-3xl font-semibold sm:text-4xl">Bitácora de Café</h1>
+      <p className="mt-2 max-w-xl text-muted-foreground">
+        Lo que los caficultores cuentan por WhatsApp, ordenado lote por lote.
+      </p>
+      <div className="mt-6 flex flex-wrap gap-3">
+        <Button asChild size="lg">
+          <Link href="/lotes">
+            <LayoutGrid aria-hidden />
+            Ver los lotes
+          </Link>
+        </Button>
+        <Button asChild size="lg" variant="outline">
+          <Link href="/alertas">
+            <Bell aria-hidden />
+            Ver las alertas
+          </Link>
+        </Button>
+      </div>
 
-      <section className="mt-8 rounded-lg border border-stone-200 bg-white p-4">
-        <h2 className="font-semibold">Estado del sistema</h2>
-        {salud === null ? (
-          <p className="mt-2 text-red-700">No pudimos conectarnos con el servidor.</p>
-        ) : (
-          <>
-            <p className={`mt-2 ${todoBien ? "text-green-700" : "text-red-700"}`}>
-              {todoBien ? "Todo está funcionando." : "Hay un problema en el sistema."}
-            </p>
-            <ul className="mt-2 text-sm text-stone-600">
-              <li>Base de datos: {salud.checks.db === "ok" ? "bien" : "con fallas"}</li>
-              <li>Cola de tareas: {salud.checks.redis === "ok" ? "bien" : "con fallas"}</li>
-            </ul>
-          </>
-        )}
-      </section>
+      <Card className="mt-10 max-w-md">
+        <CardHeader>
+          <CardTitle className="font-serif">Estado del sistema</CardTitle>
+        </CardHeader>
+        <CardContent className="text-sm">
+          {salud === null ? (
+            <p className="text-destructive">No pudimos conectarnos con el servidor.</p>
+          ) : (
+            <>
+              <p className={todoBien ? "font-medium text-primary" : "font-medium text-destructive"}>
+                {todoBien ? "Todo está funcionando." : "Hay un problema en el sistema."}
+              </p>
+              <ul className="mt-3 space-y-1 text-muted-foreground">
+                <Chequeo nombre="Base de datos" bien={salud.checks.db === "ok"} />
+                <Chequeo nombre="Cola de tareas" bien={salud.checks.redis === "ok"} />
+              </ul>
+            </>
+          )}
+        </CardContent>
+      </Card>
     </main>
   );
 }

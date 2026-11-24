@@ -1,96 +1,149 @@
+import { ArrowLeft, ChartLine, History, MapPin, TriangleAlert } from "lucide-react";
+import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { cache } from "react";
 
-import { historiaLote, MENSAJES_ERROR, type Evento } from "@/lib/api";
+import { ErrorCarga, Vacio } from "@/components/bitacora/estados";
+import { GraficaMediciones } from "@/components/bitacora/grafica-mediciones";
+import { LineaTiempo } from "@/components/bitacora/linea-tiempo";
+import { ListaAlertas } from "@/components/bitacora/lista-alertas";
+import { Badge } from "@/components/ui/badge";
+import { historiaLote } from "@/lib/api";
 
 export const dynamic = "force-dynamic";
 
-function TarjetaEvento({ evento }: { evento: Evento }) {
+// Una sola consulta por visita, aunque la usen el título y la página.
+const cargarLote = cache(historiaLote);
+
+type Props = { params: Promise<{ id: string }> };
+
+export async function generateMetadata({ params }: Props): Promise<Metadata> {
+  const r = await cargarLote((await params).id);
+  return { title: r.ok ? `${r.datos.lote.nombre} (${r.datos.lote.codigo})` : "Lote" };
+}
+
+function Seccion({
+  titulo,
+  icono: Icono,
+  children,
+  descripcion,
+}: {
+  titulo: string;
+  icono: typeof History;
+  children: React.ReactNode;
+  descripcion?: string;
+}) {
   return (
-    <li className="relative pl-5">
-      <span className="absolute -left-[7px] top-5 h-3 w-3 rounded-full bg-amber-700" aria-hidden />
-      <article className="rounded-lg border border-stone-200 bg-white p-4">
-        <p className="text-sm text-stone-600">
-          <time dateTime={evento.fecha}>{evento.fecha_texto}</time>
-          {evento.hora && <> · {evento.hora}</>}
-        </p>
-        <h3 className="mt-1 text-lg font-semibold">{evento.actividad}</h3>
-        {evento.datos.length > 0 && (
-          <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
-            {evento.datos.map((d) => (
-              <div key={d.etiqueta} className="contents">
-                <dt className="text-stone-600">{d.etiqueta}</dt>
-                <dd className="font-medium">{d.valor}</dd>
-              </div>
-            ))}
-          </dl>
-        )}
-        {evento.texto_original && (
-          <details className="mt-3 text-sm">
-            <summary className="cursor-pointer text-stone-600">Lo que contó el caficultor</summary>
-            <p className="mt-1 whitespace-pre-line text-stone-800">{evento.texto_original}</p>
-          </details>
-        )}
-      </article>
-    </li>
+    <section className="mt-10">
+      <h2 className="flex items-center gap-2 text-xl font-semibold">
+        <Icono aria-hidden className="size-5 text-terracota" />
+        {titulo}
+      </h2>
+      {descripcion && <p className="mt-1 text-sm text-muted-foreground">{descripcion}</p>}
+      <div className="mt-4">{children}</div>
+    </section>
   );
 }
 
-export default async function HistoriaDelLote({ params }: { params: Promise<{ id: string }> }) {
+export default async function DetalleLote({ params }: Props) {
   const { id } = await params;
-  const resultado = await historiaLote(id);
+  const resultado = await cargarLote(id);
 
   if (!resultado.ok && resultado.motivo === "no_encontrado") notFound();
 
   return (
-    <main className="mx-auto max-w-3xl p-4 sm:p-8">
-      <Link href="/lotes" className="text-sm text-amber-800 hover:underline">
-        ← Volver a los lotes
+    <main className="mx-auto max-w-5xl px-4 py-6 sm:px-6 sm:py-8">
+      <Link
+        href="/lotes"
+        className="inline-flex items-center gap-1 text-sm text-primary underline-offset-4 hover:underline"
+      >
+        <ArrowLeft aria-hidden className="size-4" />
+        Volver a los lotes
       </Link>
 
       {!resultado.ok ? (
-        <p className="mt-6 rounded-lg border border-red-200 bg-red-50 p-4 text-red-800">
-          {MENSAJES_ERROR[resultado.motivo]}
-        </p>
+        <ErrorCarga motivo={resultado.motivo} className="mt-6" />
       ) : (
-        <>
-          <header className="mt-4">
-            <h1 className="text-3xl font-bold">
-              {resultado.datos.lote.nombre}{" "}
-              <span className="font-normal text-stone-500">· {resultado.datos.lote.codigo}</span>
-            </h1>
-            <p className="mt-2 text-stone-600">
-              {[
-                resultado.datos.lote.finca && `Finca ${resultado.datos.lote.finca}`,
-                resultado.datos.lote.variedad && `Variedad ${resultado.datos.lote.variedad}`,
-                resultado.datos.lote.proceso && `Proceso ${resultado.datos.lote.proceso}`,
-                !resultado.datos.lote.activo && "Inactivo",
-              ]
-                .filter(Boolean)
-                .join(" · ")}
-            </p>
-          </header>
-
-          <h2 className="mt-8 text-xl font-semibold">Historia del lote</h2>
-          {resultado.datos.eventos.length === 0 ? (
-            <p className="mt-4 rounded-lg border border-stone-200 bg-white p-4 text-stone-700">
-              Todavía no hay actividades. Aparecen aquí cuando el caficultor cuenta por WhatsApp lo
-              que hizo y lo confirma.
-            </p>
-          ) : (
+        (() => {
+          const { lote, eventos, mediciones, alertas } = resultado.datos;
+          const pendientes = eventos.filter((e) => e.estado === "pendiente").length;
+          return (
             <>
-              <p className="mt-1 text-sm text-stone-600">
-                De la más antigua a la más reciente. Solo se muestran las actividades que el
-                caficultor confirmó.
-              </p>
-              <ol className="mt-4 space-y-4 border-l-2 border-amber-200 pl-0">
-                {resultado.datos.eventos.map((evento) => (
-                  <TarjetaEvento key={evento.id} evento={evento} />
-                ))}
-              </ol>
+              <header className="mt-4">
+                <p className="font-mono text-sm font-medium tracking-wide text-terracota">{lote.codigo}</p>
+                <h1 className="text-3xl font-semibold sm:text-4xl">{lote.nombre}</h1>
+                <p className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-muted-foreground">
+                  {lote.finca && (
+                    <span className="inline-flex items-center gap-1">
+                      <MapPin aria-hidden className="size-4" />
+                      Finca {lote.finca}
+                    </span>
+                  )}
+                  {lote.variedad && <span>Variedad {lote.variedad}</span>}
+                  {lote.proceso && <span>Proceso {lote.proceso}</span>}
+                </p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {lote.etapa ? (
+                    <Badge className="bg-verde-suave text-primary">En {lote.etapa.toLowerCase()}</Badge>
+                  ) : (
+                    <Badge variant="outline" className="text-muted-foreground">
+                      Sin proceso en curso
+                    </Badge>
+                  )}
+                  <Badge variant="outline">
+                    {lote.eventos} {lote.eventos === 1 ? "registro confirmado" : "registros confirmados"}
+                  </Badge>
+                  {pendientes > 0 && (
+                    <Badge variant="outline" className="border-terracota/40 text-terracota">
+                      {pendientes} esperando confirmación
+                    </Badge>
+                  )}
+                  {!lote.activo && <Badge variant="outline">Inactivo</Badge>}
+                </div>
+              </header>
+
+              {alertas.length > 0 && (
+                <Seccion titulo="Alertas abiertas" icono={TriangleAlert}>
+                  <ListaAlertas alertas={alertas} conLote={false} />
+                </Seccion>
+              )}
+
+              <Seccion
+                titulo="Mediciones"
+                icono={ChartLine}
+                descripcion="Temperatura, humedad y otros datos medidos, según los registros confirmados."
+              >
+                {mediciones.length === 0 ? (
+                  <Vacio titulo="Todavía no hay mediciones" icono={ChartLine}>
+                    Aparecen cuando el caficultor cuenta, por ejemplo, a cuántos grados está la
+                    fermentación o cuánta humedad marcó el café.
+                  </Vacio>
+                ) : (
+                  <GraficaMediciones series={mediciones} />
+                )}
+              </Seccion>
+
+              <Seccion
+                titulo="Historia del lote"
+                icono={History}
+                descripcion={
+                  eventos.length > 0
+                    ? "De lo más antiguo a lo más reciente. Solo lo confirmado por el caficultor cuenta en la historia."
+                    : undefined
+                }
+              >
+                {eventos.length === 0 ? (
+                  <Vacio titulo="Todavía no hay registros">
+                    Aparecen aquí cuando el caficultor cuenta por WhatsApp lo que hizo en este lote.
+                  </Vacio>
+                ) : (
+                  <LineaTiempo items={eventos.map((e) => ({ ...e, clave: e.id }))} />
+                )}
+              </Seccion>
             </>
-          )}
-        </>
+          );
+        })()
       )}
     </main>
   );

@@ -255,3 +255,20 @@ Formato: cada decisión tiene fecha, contexto, decisión y consecuencias. Las nu
 - **Consecuencias:**
   - Una pregunta que no esté en la lista o sea más larga ("¿cómo va el secado del lote 3?") sigue yendo a Claude. El prompt ya le pide devolver cero eventos ante una pregunta, así que el caficultor recibe "no te entendí" y no se guarda nada. Si aparecen preguntas frecuentes que no están, se agregan a la lista.
   - Los números dichos con palabras ("el lote tres") no se reconocen como lote. Es la misma limitación que tiene RESUMEN.
+
+## D-022 · Panel completo y página pública del lote (/l/<token>)
+- **Fecha:** 2026-11-24
+- **Contexto:** El panel (D-020) solo tenía la lista de lotes y la historia confirmada. Faltaban la etapa y las alertas de cada lote, el estado de los eventos, las mediciones en el tiempo, la pantalla de alertas y una página para que un comprador vea la historia del lote sin clave.
+- **Decisión:**
+  1. **Panel con shadcn/ui** (Next.js + Tailwind 4), paleta de finca: verde profundo y terracota sobre fondo crudo, títulos con serifa. Cada pantalla tiene estado de carga (`loading.tsx`), de error (`error.tsx`) y vacío.
+  2. **Lista de lotes:** etapa (calculada con `etapas:` de `config/alertas.yaml`, que ahora acepta `nombre`), último registro y alertas abiertas. La etapa de todos los lotes sale de una sola consulta (`events.list_by_status`).
+  3. **Detalle del lote:** línea de tiempo con ícono por tipo de evento y **estado** de cada uno (confirmado, esperando confirmación, cancelado). Cambia D-020.4: el panel ahora muestra también los pendientes y cancelados, marcados; solo los confirmados cuentan en el número de registros, en la etapa y en las gráficas (regla de oro 2).
+  4. **Mediciones:** los datos con `grafica: true` en `config/eventos.yaml` (temperatura, humedad, horas de fermentación, porcentaje afectado). Una gráfica por dato y unidad: la temperatura de volteos y mediciones va junta.
+  5. **Alertas:** `GET /panel/alertas`, las abiertas de la organización del token, la más reciente primero, con si ya se le avisó al caficultor.
+  6. **Página pública** `/l/<token>` (Next.js) y `GET /publico/lotes/{token}` (API), sin clave. El token del lote (256 bits, `lots.public_token`) es la llave. Para hallar la organización hay una tercera excepción explícita a la regla de oro 1 en `app/db/repositories/routing.py`: solo devuelve el id de la organización, y el lote se busca después con `organization_id`. El proxy del panel (`web/src/proxy.ts`) deja pasar `/l/` sin la clave Basic.
+  7. **Qué ve el comprador:** solo eventos confirmados de tipos con `publico` (por defecto sí) y solo sus datos con `publico` (por defecto sí). Se marcaron `publico: false` la venta (precios y compradores), los jornales y los recolectores. Nunca salen el texto original del caficultor, nombres ni teléfonos, ni la hora. Un tipo o dato que ya no esté en el catálogo no sale. La página pide a los buscadores no indexarla.
+- **Consecuencias:**
+  - Antes de mandarle el enlace a un comprador, revisar con Brayan qué datos son aptos: basta con cambiar `publico` en `config/eventos.yaml`, sin tocar código. Hoy salen, por ejemplo, la broca o la roya que se vio en el lote.
+  - Si un enlace se comparte por error, `lots.regenerate_public_token` lo invalida (todavía no hay botón en el panel).
+  - El token público viaja en la URL: Caddy no registra accesos (D-019), pero quien tenga el enlace ve la historia.
+  - Un `notFound()` después de que la página empezó a cargar responde 200 con la pantalla de "no encontramos" (así funciona Next.js con `loading.tsx`); no se filtra nada del lote.

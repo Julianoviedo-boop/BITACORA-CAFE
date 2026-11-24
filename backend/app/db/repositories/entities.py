@@ -264,6 +264,18 @@ class LotEventRepository(OrganizationScopedRepository[LotEvent]):
         stmt = stmt.order_by(LotEvent.occurred_at, LotEvent.id)
         return self.session.scalars(stmt).all()
 
+    def list_by_status(self, organization_id: uuid.UUID, status: str) -> Sequence[LotEvent]:
+        """Todos los eventos de lotes en ese estado, del más viejo al más nuevo.
+
+        Para calcular la etapa de cada lote en la lista del panel con una sola
+        consulta (en lugar de una por lote)."""
+        stmt = (
+            self._select(organization_id)
+            .where(LotEvent.status == status, LotEvent.lot_id.is_not(None))
+            .order_by(LotEvent.occurred_at, LotEvent.id)
+        )
+        return self.session.scalars(stmt).all()
+
     def summary_by_lot(
         self, organization_id: uuid.UUID, *, status: str = "confirmado"
     ) -> dict[uuid.UUID, tuple[int, datetime]]:

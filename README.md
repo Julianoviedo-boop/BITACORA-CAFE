@@ -171,4 +171,4 @@ docs/               Especificación, decisiones y despliegue
 
 ## Estado
 
-Primera versión en construcción. Funcionan el flujo completo por WhatsApp (audio o texto → transcripción → extracción → preguntas → confirmación), las alertas y el despliegue. El panel muestra la lista de lotes y la historia de cada uno (eventos confirmados, en orden). Faltan el reporte de trazabilidad por lote y las vistas de alertas y de eventos pendientes para el asesor. Ver [docs/especificacion.md](docs/especificacion.md).
+Primera versión en construcción. Funcionan el flujo completo por WhatsApp (audio o texto → transcripción → extracción → preguntas → confirmación), las alertas y el despliegue. El panel muestra los lotes con su etapa y alertas, la historia de cada lote con el estado de cada registro y gráficas de las mediciones, y las alertas abiertas. Cada lote tiene una página pública (`/l/<token>`) para compradores, sin clave (D-022). Falta el reporte PDF con QR. Ver [docs/especificacion.md](docs/especificacion.md).

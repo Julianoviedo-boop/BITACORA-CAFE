@@ -81,6 +81,8 @@ class Condicion(_Modelo):
 
 
 class Etapa(_Modelo):
+    # Cómo se llama en el panel ("Fermentación"). Si falta, sale de la clave.
+    nombre: str | None = None
     empieza_con: list[Condicion] = Field(min_length=1)
     termina_con: list[Condicion] = Field(default_factory=list)
 
@@ -386,6 +388,14 @@ def etapa_del_lote(reglas: ReglasAlertas, eventos: Iterable[Any]) -> EtapaLote |
         elif efecto is not None:
             actual = EtapaLote(efecto, ev.occurred_at, momento_para_plazos(ev))
     return actual
+
+
+def nombre_etapa(reglas: ReglasAlertas, clave: str) -> str:
+    """El nombre de la etapa para el panel: `nombre` en el YAML o la clave legible."""
+    etapa = reglas.etapas.get(clave)
+    if etapa is not None and etapa.nombre:
+        return etapa.nombre
+    return clave.replace("_", " ").capitalize()
 
 
 def etapa_del_evento(reglas: ReglasAlertas, eventos: Iterable[Any], evento: Any) -> str | None:

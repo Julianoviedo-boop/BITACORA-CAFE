@@ -1,4 +1,4 @@
-"""Endpoints de solo lectura para el panel web (ver docs/decisiones.md, D-020).
+"""Endpoints de solo lectura para el panel web (ver docs/decisiones.md, D-020 y D-022).
 
 Los llama el servidor de Next.js, nunca el navegador. Se autentican con
 `Authorization: Bearer <PANEL_API_TOKEN>`, y el token vale para una sola
@@ -17,7 +17,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 
 from app.config import Settings, get_settings
 from app.db.repositories import Repositories, unit_of_work
-from app.domain.historia_lote import historia_lote, listar_lotes
+from app.domain.historia_lote import alertas_abiertas, historia_lote, listar_lotes
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/panel", tags=["panel"])
@@ -78,3 +78,12 @@ def lote(
     if historia is None:
         raise HTTPException(status_code=404, detail="No encontramos ese lote")
     return asdict(historia)
+
+
+@router.get("/alertas")
+def alertas(
+    org_id: uuid.UUID = Depends(organizacion_del_panel),
+    repos: Repositories = Depends(repositorios),
+) -> dict:
+    """Las alertas abiertas (sin enviar o ya enviadas al productor), la más reciente primero."""
+    return {"alertas": [asdict(a) for a in alertas_abiertas(repos, org_id)]}

@@ -197,6 +197,7 @@ ATTACKS: list[Attack] = [
     Attack("events", "list_by_lot", "lote de B pendientes",
            lambda w: _a(w.b.lot_id, status="pendiente")),
     Attack("events", "summary_by_lot", "resumen de A", lambda w: _a(status="pendiente")),
+    Attack("events", "list_by_status", "pendientes de A", lambda w: _a("pendiente")),
     Attack("events", "confirm", "evento de B", lambda w: _a(w.b.event_id)),
     Attack("events", "reject", "evento de B", lambda w: _a(w.b.event_id)),
     # alerts
