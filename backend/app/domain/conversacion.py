@@ -14,6 +14,11 @@ consentimiento y, si es audio, de la transcripción):
   Lo mismo si se le repite `max_rondas` veces la misma pregunta.
 - Comandos en cualquier momento: "mis lotes", "resumen lote 3", "ayuda". No
   cambian el estado; si había una pregunta abierta, se le recuerda.
+- Consultas: "¿cómo va el lote 3?", "¿qué se ha hecho en La Esperanza?" dan el
+  mismo resumen que "resumen lote 3", sin llamar a Claude y sin crear eventos. Solo
+  cuentan como consulta si lo que sigue a la pregunta es un lote (dice "lote", trae
+  un número o es el nombre de un lote); si no, o si el mensaje es largo ("¿cómo
+  está el lote 3? hoy le echamos abono"), se trata como un registro.
 - Regla de oro 2: `events.confirm` solo se llama en `_ejecutar` con la acción
   "confirmar", que solo sale de una respuesta de la lista `respuestas.confirmar`
   estando en estado "confirmando" (el resumen ya se le mostró).
@@ -92,7 +97,7 @@ CLAVES_TEXTOS = (
     "confirmar_uno", "confirmar_varios", "pregunta_dato", "ofrecer_lote", "lote_creado",
     "confirmado", "cancelado", "nada_pendiente", "que_cambiar", "no_entendi",
     "no_entendi_correccion", "asesor", "error", "solo_audio_texto", "recordatorio", "ayuda",
-    "mis_lotes", "sin_lotes", "resumen", "resumen_vacio", "resumen_sin_lote",
+    "mis_lotes", "sin_lotes", "resumen", "resumen_vacio", "resumen_sin_lote", "resumen_total",
     "lote_no_encontrado",
 )
 
@@ -107,6 +112,11 @@ class TextosConversacion:
     ayuda: frozenset[str]
     # Normalizados, del más largo al más corto.
     prefijos_resumen: tuple[str, ...]
+    # Preguntas por un lote ("como va", "que se ha hecho en"), del más largo al más corto.
+    prefijos_consulta: tuple[str, ...]
+    # Lo que se quita al inicio ("hola") y al final ("por favor") antes de buscar un comando.
+    saludos: tuple[str, ...]
+    cortesias: tuple[str, ...]
     preguntas: dict[str, str]
     # unidad -> (singular, plural)
     unidades: dict[str, tuple[str, str]]
@@ -127,6 +137,14 @@ def _lista(path: Path, donde: str, valor: Any) -> frozenset[str]:
         # YAML lee  no / si / yes  sin comillas como booleanos.
         raise ValueError(f"{path}: {donde} debe tener textos entre comillas; llegó {raras}")
     return frozenset(normalizar(v) for v in valor) - {""}
+
+
+def _por_largo(valores: frozenset[str]) -> tuple[str, ...]:
+    return tuple(sorted(valores, key=len, reverse=True))
+
+
+def _lista_opcional(path: Path, donde: str, valor: Any) -> frozenset[str]:
+    return frozenset() if valor is None else _lista(path, donde, valor)
 
 
 def cargar_textos(config_dir: str | Path) -> TextosConversacion:
@@ -153,6 +171,9 @@ def cargar_textos(config_dir: str | Path) -> TextosConversacion:
                 raise ValueError(f"{path}: «{v}» está en {vistos[v]} y en {nombre}")
             vistos[v] = nombre
     prefijos = _lista(path, "comandos.resumen", comandos.get("resumen"))
+    consulta = _lista_opcional(path, "comandos.consulta", comandos.get("consulta"))
+    saludos = _lista_opcional(path, "comandos.saludos", comandos.get("saludos"))
+    cortesias = _lista_opcional(path, "comandos.cortesias", comandos.get("cortesias"))
 
     preguntas = data.get("preguntas") or {}
     faltan = [k for k in ("lote", "fecha", "generica") if not str(preguntas.get(k) or "").strip()]
@@ -180,7 +201,10 @@ def cargar_textos(config_dir: str | Path) -> TextosConversacion:
         cancelar=grupos["respuestas.cancelar"],
         mis_lotes=grupos["comandos.mis_lotes"],
         ayuda=grupos["comandos.ayuda"],
-        prefijos_resumen=tuple(sorted(prefijos, key=len, reverse=True)),
+        prefijos_resumen=_por_largo(prefijos),
+        prefijos_consulta=_por_largo(consulta),
+        saludos=_por_largo(saludos),
+        cortesias=_por_largo(cortesias),
         preguntas={k: str(preguntas[k]).strip() for k in ("lote", "fecha", "generica")},
         unidades=unidades,
         textos={k: str(textos[k]) for k in CLAVES_TEXTOS},
@@ -339,10 +363,57 @@ Accion = Literal["vacio", "mis_lotes", "ayuda", "resumen", "nada_pendiente", "co
                  "extraer", "revisar"]
 
 
-def clasificar(texto: str | None, textos: TextosConversacion) -> tuple[Intencion, str | None]:
+def _sin_relleno(t: str, textos: TextosConversacion) -> str:
+    """Quita un saludo al inicio y cortesías al final: "hola como va el 3 por favor"
+    -> "como va el 3". Si no queda nada, deja el texto como estaba ("hola")."""
+    limpio = t
+    for saludo in textos.saludos:
+        if limpio.startswith(saludo + " "):
+            limpio = limpio[len(saludo) + 1:]
+            break
+    quitado = True
+    while quitado:
+        quitado = False
+        for cortesia in textos.cortesias:
+            if limpio.endswith(" " + cortesia):
+                limpio, quitado = limpio[:-len(cortesia) - 1], True
+                break
+    return limpio or t
+
+
+def _es_lote(resto: str, lotes: Sequence[LoteContexto]) -> bool:
+    """¿Lo que sigue a "como va" nombra un lote? Dice "lote", trae un número o es
+    el nombre o el código de un lote ("la esperanza")."""
+    if "lote" in resto.split() or any(c.isdigit() for c in resto):
+        return True
+    conocidos: set[str] = set()
+    for lote in lotes:
+        conocidos |= _variantes(lote.nombre) | _variantes(lote.codigo)
+    return bool(_variantes(resto) & conocidos)
+
+
+def _consulta(t: str, textos: TextosConversacion,
+              lotes: Sequence[LoteContexto]) -> str | None:
+    """El lote por el que pregunta ("como va el lote 3" -> "3"), o None si no es
+    una consulta."""
+    for prefijo in textos.prefijos_consulta:
+        if not t.startswith(prefijo + " "):
+            continue
+        resto = t[len(prefijo) + 1:]
+        if len(resto.split()) > RESUMEN_MAX_PALABRAS_LOTE or not _es_lote(resto, lotes):
+            return None
+        return _ARTICULOS.sub("", resto).strip() or resto
+    return None
+
+
+def clasificar(texto: str | None, textos: TextosConversacion,
+               lotes: Sequence[LoteContexto] = ()) -> tuple[Intencion, str | None]:
+    """Qué quiere el productor, sin Claude. `lotes` sirve para reconocer una consulta
+    por el nombre del lote ("¿cómo va La Esperanza?")."""
     t = normalizar(texto or "")
     if not t:
         return "vacio", None
+    t = _sin_relleno(t, textos)
     if t in textos.mis_lotes:
         return "mis_lotes", None
     if t in textos.ayuda:
@@ -355,6 +426,8 @@ def clasificar(texto: str | None, textos: TextosConversacion) -> tuple[Intencion
             if len(resto.split()) <= RESUMEN_MAX_PALABRAS_LOTE:
                 return "resumen", resto
             break  # texto largo: es un reporte ("resumen de la semana: ...")
+    if (referencia := _consulta(t, textos, lotes)) is not None:
+        return "resumen", referencia
     if t in textos.cancelar:
         return "cancelar", None
     if t in textos.confirmar:
@@ -504,7 +577,7 @@ def atender(
         if foto is None:
             return "omitido"
 
-        intencion, referencia = clasificar(foto.texto, textos)
+        intencion, referencia = clasificar(foto.texto, textos, foto.lotes)
         accion = planear(foto.estado, foto.rondas, intencion, textos)
         try:
             propuesta = _interpretar(accion, foto, interprete)
@@ -953,7 +1026,10 @@ def _comando(ctx: _Ctx, accion: Accion, referencia: str | None) -> str | None:
         lineas.append("• " + linea_evento(ev.event_type, None, local.date(), hora,
                                           _datos_desde_json(ev.data), ctx.hoy, ctx.textos,
                                           ctx.catalogo))
-    return t("resumen", lote=f"{lote.name} ({lote.code})", eventos="\n".join(lineas))
+    texto = t("resumen", lote=f"{lote.name} ({lote.code})", eventos="\n".join(lineas))
+    if len(eventos) > RESUMEN_MAX_EVENTOS:
+        texto += "\n" + t("resumen_total", total=len(eventos))
+    return texto
 
 
 def _datos_desde_json(data: dict[str, Any] | None) -> dict[str, DatoMedido | None]:

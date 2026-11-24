@@ -14,6 +14,7 @@ PostgreSQL real. Lo único falso es:
 """
 
 import datetime as dt
+from zoneinfo import ZoneInfo
 import importlib.util
 import uuid
 from pathlib import Path
@@ -480,6 +481,63 @@ def test_resumen_lote_muestra_lo_confirmado(mundo):
     p.escribe("sí")
     assert p.escribe("Resumen del lote 3") == [
         "Lote 3 (LOTE-003), últimos registros:\n• Abonada, hoy 7:30 a.m., 17-6-18, 4 bultos"]
+
+
+def test_como_va_el_lote_responde_el_resumen_sin_registrar_nada(mundo):
+    p, claude = mundo.productor, mundo.claude
+    claude.responde(abonada())
+    p.escribe("Hoy abonamos el lote 3 con 4 bultos de 17-6-18")
+    p.escribe("sí")
+    llamadas, eventos = len(claude.llamadas), len(_eventos(mundo))
+
+    esperado = ["Lote 3 (LOTE-003), últimos registros:\n"
+                "• Abonada, hoy 7:30 a.m., 17-6-18, 4 bultos"]
+    assert p.escribe("¿Cómo va el lote 3?") == esperado
+    assert p.habla("Hola, ¿cómo va el lote 3?") == esperado
+    assert p.escribe("¿Cómo va La Esperanza?") == [
+        "La Esperanza todavía no tiene registros confirmados."]
+
+    # Ni Claude ni eventos nuevos: no se confundió con un registro.
+    assert len(claude.llamadas) == llamadas
+    assert len(_eventos(mundo)) == eventos
+    assert _conversacion(mundo).state == "libre"
+
+
+def test_pregunta_con_una_labor_es_un_registro(mundo):
+    p, claude = mundo.productor, mundo.claude
+    claude.responde(abonada())
+    assert p.escribe("¿Cómo está el lote 3? Hoy le echamos 4 bultos de 17-6-18") == [
+        "Lote 3: abonada, hoy 7:30 a.m., 17-6-18, 4 bultos. " + CONFIRMAR]
+    assert len(claude.llamadas) == 1
+
+
+def test_consulta_en_medio_de_la_confirmacion_no_confirma_nada(mundo):
+    p, claude = mundo.productor, mundo.claude
+    claude.responde(abonada())
+    [resumen] = p.escribe("Hoy abonamos el lote 3 con 4 bultos de 17-6-18")
+
+    [respuesta] = p.escribe("¿cómo va el lote 3?")
+    assert respuesta.startswith("Lote 3 todavía no tiene registros confirmados.")
+    assert respuesta.endswith(f"Sigo esperando tu respuesta: {resumen}")
+    assert _conversacion(mundo).state == "confirmando"
+    assert [e.status for e in _eventos(mundo)] == ["pendiente"]
+
+
+def test_resumen_largo_dice_el_total(mundo):
+    p = mundo.productor
+    lote = mundo.repos.lots.get_by_code(mundo.org_id, "LOTE-003")
+    for dia in range(1, 8):
+        ev = mundo.repos.events.add(
+            mundo.org_id, lot_id=lote.id, event_type="volteo",
+            occurred_at=dt.datetime(2026, 10, dia, 9, tzinfo=ZoneInfo("America/Bogota")), data={})
+        mundo.repos.events.confirm(mundo.org_id, ev.id)
+    mundo.session.flush()
+
+    [respuesta] = p.escribe("cómo va el lote 3")
+    lineas = respuesta.split("\n")
+    assert len([x for x in lineas if x.startswith("• ")]) == 5
+    assert lineas[1].startswith("• Volteo, miércoles 7 de octubre")  # lo más reciente primero
+    assert lineas[-1] == "En total van 7 registros confirmados."
 
 
 def test_comando_en_medio_de_la_confirmacion_no_pierde_el_estado(mundo):

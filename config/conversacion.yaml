@@ -73,6 +73,41 @@ comandos:
     - "resumen lote"
     - "resumen de"
     - "resumen"
+  # Preguntas por un lote: lo que sigue es el lote ("¿cómo va el lote 3?", "¿cómo
+  # va La Esperanza?"). Responden igual que RESUMEN. Solo cuentan si lo que sigue
+  # dice "lote", trae un número o es el nombre de un lote, y si es corto; si no
+  # ("¿cómo está el lote 3? hoy le echamos abono") es un registro y lo lee Claude.
+  consulta:
+    - "cómo va"
+    - "cómo va en"
+    - "cómo van en"
+    - "cómo vamos con"
+    - "cómo vamos en"
+    - "cómo está"
+    - "cómo sigue"
+    - "en qué va"
+    - "qué se ha hecho en"
+    - "qué se ha hecho al"
+    - "qué le hemos hecho al"
+    - "qué le han hecho al"
+    - "qué ha pasado en"
+    - "qué hay del"
+    - "historia del"
+    - "historia de"
+    - "historia"
+  # Se quitan antes de buscar un comando: "Hola, ¿cómo va el lote 3?" o
+  # "mis lotes por favor". Los saludos solo al inicio y las cortesías solo al final.
+  saludos:
+    - "hola"
+    - "buenas"
+    - "buenos días"
+    - "buenas tardes"
+    - "buenas noches"
+    - "buen día"
+  cortesias:
+    - "por favor"
+    - "porfa"
+    - "gracias"
 
 # Preguntas por los datos comunes a todos los eventos. Las de cada campo están
 # en config/eventos.yaml (pregunta:). Si un campo obligatorio no tiene pregunta,
@@ -137,7 +172,7 @@ textos:
     Mándame un audio o un texto con lo que hiciste en tu lote. Por ejemplo: «Hoy abonamos el lote 3 con 4 bultos de 17-6-18».
     También puedes escribir:
     • MIS LOTES: ver tus lotes
-    • RESUMEN LOTE 3: ver lo último que se hizo en un lote
+    • RESUMEN LOTE 3 o ¿CÓMO VA EL LOTE 3?: ver lo último que se hizo en un lote
     • CANCELAR: borrar lo que esté pendiente
   mis_lotes: |
     Tus lotes:
@@ -146,6 +181,8 @@ textos:
   resumen: |
     {lote}, últimos registros:
     {eventos}
+  # Va debajo del resumen cuando el lote tiene más registros de los que se muestran.
+  resumen_total: "En total van {total} registros confirmados."
   resumen_vacio: "{lote} todavía no tiene registros confirmados."
   resumen_sin_lote: "¿De qué lote quieres el resumen? Por ejemplo: RESUMEN LOTE 3."
   lote_no_encontrado: "No encontré el lote «{lote}». Escribe MIS LOTES para ver tus lotes."

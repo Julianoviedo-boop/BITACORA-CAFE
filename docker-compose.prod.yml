@@ -99,6 +99,10 @@ services:
     restart: unless-stopped
     environment:
       API_INTERNAL_URL: http://api:8000
+      # Ver docs/decisiones.md, D-020. Sin usuario y clave el panel no abre.
+      PANEL_API_TOKEN: ${PANEL_API_TOKEN:-}
+      PANEL_USUARIO: ${PANEL_USUARIO:-}
+      PANEL_CLAVE: ${PANEL_CLAVE:-}
     depends_on:
       api:
         condition: service_healthy

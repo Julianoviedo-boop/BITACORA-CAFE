@@ -59,6 +59,11 @@ class CampoDef:
     descripcion: str
     # Lo que se le pregunta al productor si falta (solo se usa en los obligatorios).
     pregunta: str | None = None
+    # Cómo se llama el dato en el panel ("Horas de fermentación").
+    etiqueta: str | None = None
+
+    def nombre_visible(self) -> str:
+        return self.etiqueta or etiqueta_por_defecto(self.clave)
 
 
 @dataclass(frozen=True)
@@ -84,6 +89,12 @@ class CatalogoEventos:
 
     def faltantes_posibles(self) -> list[str]:
         return [FALTANTE_LOTE, FALTANTE_FECHA] + list(self.campos)
+
+
+def etiqueta_por_defecto(clave: str) -> str:
+    """Nombre del campo cuando eventos.yaml no trae etiqueta: cantidad_cereza -> Cantidad cereza."""
+    texto = clave.replace("_", " ").strip()
+    return texto[:1].upper() + texto[1:]
 
 
 def _es_clave(valor: Any) -> bool:
@@ -139,6 +150,7 @@ def cargar_catalogo(config_dir: str | Path) -> CatalogoEventos:
                 clave=clave_campo, tipo=tipo, obligatorio=bool(c.get("obligatorio", False)),
                 unidades=u, descripcion=str(c.get("descripcion", "")).strip(),
                 pregunta=str(c.get("pregunta") or "").strip() or None,
+                etiqueta=str(c.get("etiqueta") or "").strip() or None,
             )
         tipos[clave_tipo] = TipoEventoDef(
             clave=clave_tipo, nombre=str(t["nombre"]).strip(),

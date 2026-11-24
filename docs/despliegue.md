@@ -151,6 +151,7 @@ En el `.env` del servidor:
    - `APP_SECRET_KEY`
    - `POSTGRES_PASSWORD` **y la misma** dentro de `DATABASE_URL`
    - `OPENBSP_WEBHOOK_SECRET` y `OPENBSP_WEBHOOK_TOKEN` (sin ellos, en producción la API no arranca; D-018)
+   - `PANEL_API_TOKEN`, y `PANEL_USUARIO` y `PANEL_CLAVE` para entrar al panel (sin ellos el panel no abre; D-020). `PANEL_ORGANIZATION_ID` es el id de la organización, el que deja `scripts/registrar_organizacion.py`.
 4. `WHATSAPP_CHANNEL=openbsp` y las llaves de OpenBSP.
 5. `ANTHROPIC_API_KEY`. Ponga también un límite de gasto mensual en la consola de Anthropic.
 6. Deje `RESPALDO_REMOTO` para el paso 9.
@@ -185,7 +186,7 @@ Los paquetes de GHCR nacen **privados**. Dos opciones:
    docker compose logs caddy | grep -i certificate     # "certificate obtained successfully"
    ```
 
-   Abra `https://panel.su-dominio.com`: debe decir "Todo está funcionando".
+   Abra `https://panel.su-dominio.com`, entre con `PANEL_USUARIO` y `PANEL_CLAVE`: debe decir "Todo está funcionando". En *Lotes* están los lotes de la organización.
 4. En OpenBSP, registre el webhook:
    - URL: `https://api.su-dominio.com/webhooks/openbsp/<OPENBSP_WEBHOOK_SECRET>`
    - Token: el valor de `OPENBSP_WEBHOOK_TOKEN`.

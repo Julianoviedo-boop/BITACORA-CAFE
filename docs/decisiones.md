@@ -228,3 +228,30 @@ Formato: cada decisión tiene fecha, contexto, decisión y consecuencias. Las nu
   - Las migraciones se aplican con la api detenida solo en `volver_version.sh`; al actualizar, la api vieja sigue atendiendo mientras migra la nueva. Las migraciones deben ser compatibles hacia atrás durante ese momento (agregar antes de quitar).
   - Un solo servidor: si se cae, no hay servicio hasta restaurarlo (pasos en `docs/despliegue.md`, sección 11). OpenBSP reintenta los webhooks, pero no indefinidamente.
   - `dozzle` usa la etiqueta `latest` y monta el socket de Docker en solo lectura; está solo en `127.0.0.1`.
+
+## D-020 · Panel: lista de lotes e historia, con clave y un token por organización
+- **Fecha:** 2026-11-24
+- **Contexto:** El panel solo tenía la página de estado. Hay que mostrar los lotes y la historia de cada uno. El panel y la api quedan en internet (D-019) y la historia trae datos de los caficultores (D-013), pero todavía no hay usuarios ni inicio de sesión.
+- **Decisión:**
+  1. **Endpoints de solo lectura** `GET /panel/lotes` y `GET /panel/lotes/{id}` (`app/api/panel.py`). La lógica está en `app/domain/historia_lote.py`.
+  2. **Los llama el servidor de Next.js, nunca el navegador**, con `Authorization: Bearer <PANEL_API_TOKEN>`. El token vale para **una sola organización**, `PANEL_ORGANIZATION_ID`, que la api lee de su propio `.env`: no se puede pedir otra organización cambiando un parámetro (regla de oro 1). Un lote de otra organización da 404. Sin token o sin organización bien configurados, los endpoints responden 503.
+  3. **Clave de acceso al panel** con HTTP Basic (`web/src/proxy.ts`, usuario y clave en `PANEL_USUARIO` y `PANEL_CLAVE`). En producción, si faltan, el panel responde 503 en lugar de quedar abierto. En desarrollo se entra sin clave.
+  4. **La historia solo muestra eventos confirmados** (regla de oro 2), del más antiguo al más nuevo, con la fecha y la hora de Colombia. Un evento a las 00:00 se muestra sin hora (así quedan los que no la dijeron, D-016).
+  5. **Nombres desde la configuración:** la actividad sale de `nombre` en `config/eventos.yaml`, cada dato de su nuevo campo opcional `etiqueta` (si falta, la clave con espacios: `cantidad_cereza` → "Cantidad cereza") y las unidades de `config/conversacion.yaml`. El formato de los números y las unidades es el mismo del resumen que se le manda al caficultor por WhatsApp.
+- **Consecuencias:**
+  - Un panel por organización: para varias organizaciones hay que levantar un panel con su propio token o, mejor, hacer inicio de sesión con usuarios. Cuando exista, reemplaza este token y la clave Basic.
+  - Todos los que entran al panel comparten un usuario y una clave: no se sabe quién vio qué. Cambie la clave si se va alguien del equipo.
+  - La lista muestra hasta 500 lotes (el máximo de los repositorios), sin paginar.
+
+
+## D-021 · Consultas por WhatsApp: "¿cómo va el lote 3?"
+- **Fecha:** 2026-11-24
+- **Contexto:** El caficultor ya podía escribir RESUMEN LOTE 3, pero lo natural es preguntar "¿cómo va el lote 3?". Esa pregunta llegaba a Claude como si fuera un registro: en el mejor caso respondía "no te entendí"; en el peor, podía armar un evento.
+- **Decisión:**
+  1. **Lista de preguntas en `config/conversacion.yaml`** (`comandos.consulta`: "cómo va", "cómo está", "qué se ha hecho en", "historia del"...). Responden igual que RESUMEN, **sin llamar a Claude y sin crear eventos**. Como los otros comandos, funcionan en cualquier momento y no cambian el estado de la conversación (si había algo por confirmar, se le recuerda).
+  2. **Solo es consulta si lo que sigue es un lote y es corto** (hasta 4 palabras): dice "lote", trae un número o es el nombre o el código de un lote de la organización. Así "¿cómo está usted?" no es una consulta, y "¿cómo está el lote 3? hoy le echamos abono" sigue siendo un registro.
+  3. **Saludos al inicio y cortesías al final** (`comandos.saludos`, `comandos.cortesias`) se quitan antes de buscar cualquier comando: "Hola, ¿cómo va el lote 3?" y "mis lotes por favor" funcionan.
+  4. **Mensaje corto:** los últimos 5 registros confirmados, el más reciente primero. Si hay más, una línea con el total (`textos.resumen_total`).
+- **Consecuencias:**
+  - Una pregunta que no esté en la lista o sea más larga ("¿cómo va el secado del lote 3?") sigue yendo a Claude. El prompt ya le pide devolver cero eventos ante una pregunta, así que el caficultor recibe "no te entendí" y no se guarda nada. Si aparecen preguntas frecuentes que no están, se agregan a la lista.
+  - Los números dichos con palabras ("el lote tres") no se reconocen como lote. Es la misma limitación que tiene RESUMEN.

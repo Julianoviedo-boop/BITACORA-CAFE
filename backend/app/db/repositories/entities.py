@@ -151,6 +151,15 @@ class LotRepository(OrganizationScopedRepository[Lot]):
         )
         return self.session.scalars(stmt).all()
 
+    def list_all(self, organization_id: uuid.UUID) -> Sequence[Lot]:
+        """Todos los lotes (activos e inactivos), primero los activos, por código."""
+        stmt = (
+            self._select(organization_id)
+            .order_by(Lot.status, Lot.code)
+            .limit(self.max_limit)
+        )
+        return self.session.scalars(stmt).all()
+
     def get_by_public_token(self, organization_id: uuid.UUID, token: str) -> Lot | None:
         stmt = self._select(organization_id).where(Lot.public_token == token)
         return self.session.scalars(stmt).one_or_none()
@@ -254,6 +263,18 @@ class LotEventRepository(OrganizationScopedRepository[LotEvent]):
             stmt = stmt.where(LotEvent.status == status)
         stmt = stmt.order_by(LotEvent.occurred_at, LotEvent.id)
         return self.session.scalars(stmt).all()
+
+    def summary_by_lot(
+        self, organization_id: uuid.UUID, *, status: str = "confirmado"
+    ) -> dict[uuid.UUID, tuple[int, datetime]]:
+        """{lot_id: (cuántos eventos, fecha del último)} de los eventos en ese estado."""
+        stmt = (
+            select(LotEvent.lot_id, func.count(), func.max(LotEvent.occurred_at))
+            .where(LotEvent.organization_id == require_org(organization_id),
+                   LotEvent.status == status, LotEvent.lot_id.is_not(None))
+            .group_by(LotEvent.lot_id)
+        )
+        return {lot_id: (n, ultimo) for lot_id, n, ultimo in self.session.execute(stmt)}
 
     def _transition(
         self, organization_id: uuid.UUID, id: uuid.UUID, new_status: str

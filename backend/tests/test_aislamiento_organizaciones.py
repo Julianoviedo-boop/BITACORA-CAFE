@@ -174,6 +174,7 @@ ATTACKS: list[Attack] = [
     Attack("lots", "get_by_public_token", "token de B", lambda w: _a(w.b.public_token)),
     Attack("lots", "list_by_farm", "finca de B", lambda w: _a(w.b.farm_id)),
     Attack("lots", "list_active", "lotes activos de A", lambda w: _a()),
+    Attack("lots", "list_all", "todos los lotes de A", lambda w: _a()),
     Attack("lots", "regenerate_public_token", "lote de B", lambda w: _a(w.b.lot_id)),
     # inbound_messages
     *_generic("messages", "message_id", {"transcription": "Hackeada"}),
@@ -195,6 +196,7 @@ ATTACKS: list[Attack] = [
     Attack("events", "list_by_lot", "lote de B", lambda w: _a(w.b.lot_id)),
     Attack("events", "list_by_lot", "lote de B pendientes",
            lambda w: _a(w.b.lot_id, status="pendiente")),
+    Attack("events", "summary_by_lot", "resumen de A", lambda w: _a(status="pendiente")),
     Attack("events", "confirm", "evento de B", lambda w: _a(w.b.event_id)),
     Attack("events", "reject", "evento de B", lambda w: _a(w.b.event_id)),
     # alerts
@@ -396,3 +398,11 @@ def test_a_si_ve_lo_suyo(world: World, repos: Repositories) -> None:
                  "conversations"):
         rows = getattr(repos, repo).list(a.org_id)
         assert len(rows) == 1 and rows[0].organization_id == a.org_id, repo
+
+
+def test_resumen_por_lote_no_incluye_lotes_de_b(world: World, repos: Repositories) -> None:
+    """summary_by_lot devuelve ids, no filas: se revisa aparte que no traiga lotes de B."""
+    repos.events.confirm(world.b.org_id, world.b.event_id)
+    repos.events.confirm(world.a.org_id, world.a.event_id)
+    assert set(repos.events.summary_by_lot(world.a.org_id)) == {world.a.lot_id}
+    assert [lt.id for lt in repos.lots.list_all(world.a.org_id)] == [world.a.lot_id]
